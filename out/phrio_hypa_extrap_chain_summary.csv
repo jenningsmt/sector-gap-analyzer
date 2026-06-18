@@ -1,0 +1,6 @@
+family,subsector,mass_prefix,spansh_max,edsm_confirmed_max,edsm_confirmed_system,steps_extended,terminated_at_step,chain_status
+Phrio Hypa PW-C,PW-C,c29,0,1,Phrio Hypa PW-C c29-1,1,2,terminated
+Phrio Hypa TF-C,TF-C,d14,8,9,Phrio Hypa TF-C d14-9,1,2,terminated
+Phrio Hypa WU-E,WU-E,d12,0,1,Phrio Hypa WU-E d12-1,1,2,terminated
+Phrio Hypa WV-B,WV-B,d14,1,2,Phrio Hypa WV-B d14-2,1,2,terminated
+Phrio Hypa ZV-K,ZV-K,d9,0,1,Phrio Hypa ZV-K d9-1,1,2,terminated
