@@ -1,6 +1,0 @@
-system_name,edsm_status,direction,steps_from_edge,spansh_edge_number,family,subsector,mass_prefix,number
-Phrio Hypa PW-C c29-2,not_in_edsm,forward,2,0,Phrio Hypa PW-C,PW-C,c29,2
-Phrio Hypa TF-C d14-10,not_in_edsm,forward,2,8,Phrio Hypa TF-C,TF-C,d14,10
-Phrio Hypa WU-E d12-2,not_in_edsm,forward,2,0,Phrio Hypa WU-E,WU-E,d12,2
-Phrio Hypa WV-B d14-3,not_in_edsm,forward,2,1,Phrio Hypa WV-B,WV-B,d14,3
-Phrio Hypa ZV-K d9-2,not_in_edsm,forward,2,0,Phrio Hypa ZV-K,ZV-K,d9,2
