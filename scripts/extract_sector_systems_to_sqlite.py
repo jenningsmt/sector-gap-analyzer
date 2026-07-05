@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -302,6 +303,16 @@ def prompt_sector_prefix() -> str:
         print("Prefix cannot be empty.")
 
 
+def matches_prefix(name: str, prefix: str, case_insensitive: bool) -> bool:
+    """True if `name` starts with `prefix` on a token boundary (prefix is the
+    whole name, or is followed by a space). Prevents "Oochost" from matching
+    an unrelated "Oochostia XY-Z"."""
+    n, p = (name.lower(), prefix.lower()) if case_insensitive else (name, prefix)
+    if not n.startswith(p):
+        return False
+    return len(n) == len(p) or n[len(p)] == " "
+
+
 def process_system(
     system: Dict[str, Any],
     sector_prefix: str,
@@ -311,12 +322,8 @@ def process_system(
     if not system_name:
         return None, [], []
 
-    if case_insensitive:
-        if not system_name.lower().startswith(sector_prefix.lower()):
-            return None, [], []
-    else:
-        if not system_name.startswith(sector_prefix):
-            return None, [], []
+    if not matches_prefix(system_name, sector_prefix, case_insensitive):
+        return None, [], []
 
     system_address = get_system_address(system)
     system_key = system_key_for(system_address, system_name)
@@ -499,54 +506,39 @@ def upsert_rings(conn: sqlite3.Connection, rows: List[Dict[str, Any]]) -> None:
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Extract sector systems from a Spansh galaxy dump into SQLite."
-    )
-    parser.add_argument("--input", default=str(DEFAULT_INPUT))
-    parser.add_argument("--output_db", default=None)
-    parser.add_argument("--sector_prefix", default=None)
-    parser.add_argument("--case_insensitive", action="store_true")
-    parser.add_argument("--case_sensitive", action="store_true")
-    parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--debug_prefix", action="store_true")
-    parser.add_argument("--stop_after_matches", type=int, default=0)
-    parser.add_argument("--commit-every-systems", type=int, default=DEFAULT_COMMIT_EVERY_SYSTEMS)
-    parser.add_argument("--commit-every-bodies", type=int, default=DEFAULT_COMMIT_EVERY_BODIES)
-    parser.add_argument("--commit-every-rings", type=int, default=DEFAULT_COMMIT_EVERY_RINGS)
-    parser.add_argument("--progress-seconds", type=int, default=DEFAULT_PROGRESS_SECONDS)
-    parser.add_argument("--progress-every-systems", type=int, default=DEFAULT_PROGRESS_EVERY_SYSTEMS)
-    args = parser.parse_args()
+def run(
+    input_path: Path,
+    sector_prefix: str,
+    case_insensitive: bool = True,
+    output_db: Optional[Path] = None,
+    limit: Optional[int] = None,
+    verbose: bool = False,
+    debug_prefix: bool = False,
+    stop_after_matches: int = 0,
+    commit_every_systems: int = DEFAULT_COMMIT_EVERY_SYSTEMS,
+    commit_every_bodies: int = DEFAULT_COMMIT_EVERY_BODIES,
+    commit_every_rings: int = DEFAULT_COMMIT_EVERY_RINGS,
+    progress_seconds: int = DEFAULT_PROGRESS_SECONDS,
+    progress_every_systems: int = DEFAULT_PROGRESS_EVERY_SYSTEMS,
+    cancel_event: Optional[threading.Event] = None,
+) -> int:
+    """Extract one sector's systems/bodies/rings into a SQLite DB.
 
-    if args.case_sensitive and args.case_insensitive:
-        print("Choose only one of --case_insensitive or --case_sensitive.")
-        return 1
-
-    sector_prefix = args.sector_prefix
-    interactive_prompt = False
-    if not sector_prefix:
-        interactive_prompt = True
-        sector_prefix = prompt_sector_prefix()
-
+    Return codes: 0 = success, 1 = input/format error, 130 = interrupted
+    (KeyboardInterrupt or cancel_event set).
+    """
     sector_prefix = sector_prefix.rstrip("\r\n")
-    if interactive_prompt:
-        case_insensitive = not args.case_sensitive
-    else:
-        case_insensitive = args.case_insensitive and not args.case_sensitive
 
-    input_path = Path(args.input)
     if not input_path.exists():
         print(f"Input file not found: {input_path}")
         return 1
 
-    output_db = args.output_db
     if not output_db:
         if resolve_sector_db_path is not None:
             output_db = resolve_sector_db_path(sector_prefix)
         else:
             sanitized = sanitize_prefix(sector_prefix)
-            output_db = str(DEFAULT_OUTPUT_DIR / f"sector_{sanitized}.sqlite")
+            output_db = DEFAULT_OUTPUT_DIR / f"sector_{sanitized}.sqlite"
 
     db_path = Path(output_db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -597,9 +589,9 @@ def main() -> int:
         if not force:
             if elapsed <= 0:
                 return
-            if (now - last_progress_time) < args.progress_seconds and (
+            if (now - last_progress_time) < progress_seconds and (
                 systems_scanned - last_progress_systems
-            ) < args.progress_every_systems:
+            ) < progress_every_systems:
                 return
         last_progress_time = now
         last_progress_systems = systems_scanned
@@ -630,15 +622,20 @@ def main() -> int:
             iterator = iter_systems_json_doc(input_path)
 
         for system in iterator:
+            if cancel_event is not None and cancel_event.is_set():
+                interrupted = True
+                print("Cancelled by user; flushing pending data...", flush=True)
+                break
+
             systems_scanned += 1
-            if args.limit is not None and systems_scanned >= args.limit:
+            if limit is not None and systems_scanned >= limit:
                 break
 
             if not isinstance(system, dict):
                 print_progress()
                 continue
 
-            if args.debug_prefix and debug_names_seen < 5:
+            if debug_prefix and debug_names_seen < 5:
                 name_preview = system.get("name") or system.get("Name") or ""
                 print(f"debug system_name[{debug_names_seen}]: {name_preview!r}")
                 debug_names_seen += 1
@@ -649,7 +646,7 @@ def main() -> int:
             system_row, body_list, ring_list = process_system(
                 system, sector_prefix, case_insensitive
             )
-            if args.debug_prefix and debug_match_seen < 5:
+            if debug_prefix and debug_match_seen < 5:
                 name_preview = system.get("name") or system.get("Name") or ""
                 matched = system_row is not None
                 print(f"debug match[{debug_match_seen}]: {name_preview!r} -> {matched}")
@@ -665,22 +662,22 @@ def main() -> int:
             ring_rows.extend(ring_list)
 
             if (
-                len(system_rows) >= args.commit_every_systems
-                or len(body_rows) >= args.commit_every_bodies
-                or len(ring_rows) >= args.commit_every_rings
+                len(system_rows) >= commit_every_systems
+                or len(body_rows) >= commit_every_bodies
+                or len(ring_rows) >= commit_every_rings
             ):
                 flush()
 
-            if args.verbose:
+            if verbose:
                 print_progress()
 
-            if args.debug_prefix and systems_scanned % 1_000_000 == 0:
+            if debug_prefix and systems_scanned % 1_000_000 == 0:
                 name_preview = system.get("name") or system.get("Name") or ""
                 print(
                     f"debug sample@{systems_scanned}: {name_preview!r} match_count={matched_systems}"
                 )
 
-            if args.stop_after_matches and matched_systems >= args.stop_after_matches:
+            if stop_after_matches and matched_systems >= stop_after_matches:
                 break
 
         flush()
@@ -709,6 +706,58 @@ def main() -> int:
     if interrupted:
         return 130
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Extract sector systems from a Spansh galaxy dump into SQLite."
+    )
+    parser.add_argument("--input", default=str(DEFAULT_INPUT))
+    parser.add_argument("--output_db", default=None)
+    parser.add_argument("--sector_prefix", default=None)
+    parser.add_argument("--case_insensitive", action="store_true")
+    parser.add_argument("--case_sensitive", action="store_true")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--debug_prefix", action="store_true")
+    parser.add_argument("--stop_after_matches", type=int, default=0)
+    parser.add_argument("--commit-every-systems", type=int, default=DEFAULT_COMMIT_EVERY_SYSTEMS)
+    parser.add_argument("--commit-every-bodies", type=int, default=DEFAULT_COMMIT_EVERY_BODIES)
+    parser.add_argument("--commit-every-rings", type=int, default=DEFAULT_COMMIT_EVERY_RINGS)
+    parser.add_argument("--progress-seconds", type=int, default=DEFAULT_PROGRESS_SECONDS)
+    parser.add_argument("--progress-every-systems", type=int, default=DEFAULT_PROGRESS_EVERY_SYSTEMS)
+    args = parser.parse_args()
+
+    if args.case_sensitive and args.case_insensitive:
+        print("Choose only one of --case_insensitive or --case_sensitive.")
+        return 1
+
+    sector_prefix = args.sector_prefix
+    interactive_prompt = False
+    if not sector_prefix:
+        interactive_prompt = True
+        sector_prefix = prompt_sector_prefix()
+
+    if interactive_prompt:
+        case_insensitive = not args.case_sensitive
+    else:
+        case_insensitive = args.case_insensitive and not args.case_sensitive
+
+    return run(
+        input_path=Path(args.input),
+        sector_prefix=sector_prefix,
+        case_insensitive=case_insensitive,
+        output_db=Path(args.output_db) if args.output_db else None,
+        limit=args.limit,
+        verbose=args.verbose,
+        debug_prefix=args.debug_prefix,
+        stop_after_matches=args.stop_after_matches,
+        commit_every_systems=args.commit_every_systems,
+        commit_every_bodies=args.commit_every_bodies,
+        commit_every_rings=args.commit_every_rings,
+        progress_seconds=args.progress_seconds,
+        progress_every_systems=args.progress_every_systems,
+    )
 
 
 if __name__ == "__main__":

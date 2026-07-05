@@ -56,6 +56,7 @@ import json
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -331,6 +332,7 @@ def validate_phase(
     candidates: list[ExtrapCandidate],
     cache_db_path: Path,
     dry_run: bool = False,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     """Resolve edsm_status on each candidate in place."""
     total = len(candidates)
@@ -358,9 +360,13 @@ def validate_phase(
     api_calls = 0
     api_errors = 0
     in_edsm_count = 0
+    check_failed: list[str] = []
 
     try:
         for i, cand in enumerate(candidates, 1):
+            if cancel_event is not None and cancel_event.is_set():
+                print(f"  Cancelled by user at {i}/{total}.", flush=True)
+                break
             cached = _cached_exists(conn, cand.system_name, EDSM_CACHE_MAX_AGE_DAYS)
             if cached is not None:
                 exists = cached
@@ -370,9 +376,14 @@ def validate_phase(
                     exists = client.exists_system(cand.system_name)
                     api_calls += 1
                 except Exception as exc:
-                    print(f"  WARNING: EDSM error for {cand.system_name!r}: {exc}", flush=True)
-                    exists = False
+                    # A failed check is NOT the same as "confirmed absent from
+                    # EDSM" -- mark it distinctly (excluded from "not_in_edsm"
+                    # results downstream) and don't cache the failure.
+                    print(f"  WARNING: EDSM check failed for {cand.system_name!r}: {exc}", flush=True)
                     api_errors += 1
+                    check_failed.append(cand.system_name)
+                    cand.edsm_status = "check_failed"
+                    continue
                 _write_cache(conn, cand.system_name, exists)
                 conn.commit()
 
@@ -392,6 +403,14 @@ def validate_phase(
                 )
     finally:
         conn.close()
+
+    if check_failed:
+        print(
+            f"\n  WARNING: {len(check_failed)} candidate(s) could not be checked "
+            f"against EDSM (marked check_failed, excluded from not_in_edsm results): "
+            f"{', '.join(check_failed[:10])}"
+            f"{' ...' if len(check_failed) > 10 else ''}"
+        )
 
     elapsed = time.time() - start
     print(f"\n  Done: {in_edsm_count} in EDSM, {total - in_edsm_count} not in EDSM, {elapsed:.0f}s")
@@ -431,6 +450,7 @@ def write_phase_markdown(
 ) -> None:
     in_edsm = [c for c in candidates if c.edsm_status == "in_edsm"]
     not_in_edsm = [c for c in candidates if c.edsm_status == "not_in_edsm"]
+    check_failed = [c for c in candidates if c.edsm_status == "check_failed"]
 
     with out_path.open("w", encoding="utf-8") as f:
         f.write(f"# {sector} — Extrapolation: {phase_label}\n\n")
@@ -463,9 +483,19 @@ def write_phase_markdown(
                 )
                 _write_md_group(f, "Not in EDSM — potential undiscovered", not_in_edsm)
 
+            if check_failed:
+                f.write(
+                    "> **Check failed** — EDSM could not be reached/queried for these "
+                    "candidates (network/SSL/API error). NOT included in the "
+                    "\"not in EDSM\" results above; re-run to retry.\n\n"
+                )
+                _write_md_group(f, "Check failed — not validated either way", check_failed)
+
         f.write(f"\n---\n\n**Phase total: {len(candidates)}**")
         if not dry_run:
             f.write(f"  |  In EDSM: {len(in_edsm)}  |  Not in EDSM: {len(not_in_edsm)}")
+            if check_failed:
+                f.write(f"  |  Check failed: {len(check_failed)}")
         f.write("\n")
 
     print(f"  MD:   {out_path}")
@@ -604,6 +634,7 @@ def run(
     max_forward_step: int,
     dry_run: bool,
     cache_db_path: Optional[Path],
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     sector = sector.strip()
     run_backward = direction in ("both", "backward")
@@ -648,13 +679,17 @@ def run(
     if run_backward:
         bwd_candidates = build_backward_candidates(names, extend_depth)
         print(f"\n=== Phase: backward ({len(bwd_candidates)} candidates) ===")
-        validate_phase(bwd_candidates, effective_cache, dry_run)
+        validate_phase(bwd_candidates, effective_cache, dry_run, cancel_event=cancel_event)
         stem = f"{sector_slug}_extrap_backward{suffix}"
         write_phase_csv(out_dir / f"{stem}.csv", bwd_candidates)
         write_phase_markdown(
             out_dir / f"{stem}.md", bwd_candidates,
             sector, db_path, "backward", dry_run, len(names),
         )
+
+    if cancel_event is not None and cancel_event.is_set():
+        print("\nCancelled by user; skipping remaining phases.", flush=True)
+        return
 
     # -------------------------------------------------------------------------
     # Forward chained phases
@@ -663,7 +698,7 @@ def run(
         # Step 1: all families
         step1 = build_forward_step1_candidates(names)
         print(f"\n=== Phase: forward step 1 ({len(step1)} candidates) ===")
-        validate_phase(step1, effective_cache, dry_run)
+        validate_phase(step1, effective_cache, dry_run, cancel_event=cancel_event)
         stem1 = f"{sector_slug}_extrap_forward_step1{suffix}"
         write_phase_csv(out_dir / f"{stem1}.csv", step1)
         write_phase_markdown(
@@ -688,6 +723,10 @@ def run(
 
         # Steps 2+: chain-extend only active families
         for step in range(2, max_forward_step + 1):
+            if cancel_event is not None and cancel_event.is_set():
+                print("\nCancelled by user; stopping chain extension.", flush=True)
+                break
+
             if not active_chains:
                 print(f"\n  No active chains remain after step {step - 1}. Forward complete.")
                 break
@@ -701,7 +740,7 @@ def run(
             if not step_candidates:
                 break
 
-            validate_phase(step_candidates, effective_cache, dry_run)
+            validate_phase(step_candidates, effective_cache, dry_run, cancel_event=cancel_event)
             stem_n = f"{sector_slug}_extrap_forward_step{step}_chain{suffix}"
             write_phase_csv(out_dir / f"{stem_n}.csv", step_candidates)
             write_phase_markdown(

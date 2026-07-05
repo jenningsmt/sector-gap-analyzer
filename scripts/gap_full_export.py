@@ -35,10 +35,12 @@ Author: CMDR Ariston / Mike (with Claude)
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -147,23 +149,36 @@ def _build_sequences(names: list[str]) -> dict[tuple[str, str], list[int]]:
     return {key: sorted(set(nums)) for key, nums in sequences.items()}
 
 
-def _generate_gaps(sequences: dict[tuple[str, str], list[int]]) -> list[str]:
+def _generate_gaps(
+    sequences: dict[tuple[str, str], list[int]],
+    max_bracket_width: Optional[int] = None,
+) -> list[str]:
     """
     Generate gap candidate names for every sequence family.
 
     Only nominates numbers that are bracketed by existing systems on both sides —
-    i.e. missing values strictly between the minimum and maximum known number in
-    each (family, prefix) sequence. No extrapolation beyond the known range.
+    i.e. missing values strictly between two *consecutive* known numbers in each
+    (family, prefix) sequence. No extrapolation beyond the known range.
 
     Example: known = [0, 1, 3, 5] → gaps = [2, 4]  (not 6, 7, ...)
+
+    If max_bracket_width is set, a gap between consecutive known numbers L and U
+    is only filled when (U - L) <= max_bracket_width; wider gaps are skipped
+    entirely (they're far more likely to be numbers Stellar Forge never
+    allocated than real missing systems, and filling them without bound can
+    produce a huge low-confidence candidate volume — see docs/gap-finder.md
+    section 4.3, "dense segment detection").
     """
     candidates: list[str] = []
     for (family, prefix), numbers in sequences.items():
-        minimum = min(numbers)
-        maximum = max(numbers)
-        number_set = set(numbers)
-        for n in range(minimum, maximum + 1):
-            if n not in number_set:
+        ordered = sorted(set(numbers))
+        for lower, upper in zip(ordered, ordered[1:]):
+            gap_width = upper - lower
+            if gap_width <= 1:
+                continue
+            if max_bracket_width is not None and gap_width > max_bracket_width:
+                continue
+            for n in range(lower + 1, upper):
                 candidates.append(f"{family} {prefix}{n}")
     return candidates
 
@@ -270,6 +285,7 @@ def validate_candidates(
     candidates: list[str],
     cache_db_path: Path,
     dry_run: bool = False,
+    cancel_event: Optional[threading.Event] = None,
 ) -> list[str]:
     """
     Filter candidates to those NOT found in EDSM (undiscovered systems).
@@ -296,9 +312,13 @@ def validate_candidates(
     cache_hits = 0
     api_calls = 0
     api_errors = 0
+    check_failed: list[str] = []
 
     try:
         for i, name in enumerate(candidates, 1):
+            if cancel_event is not None and cancel_event.is_set():
+                print(f"  Cancelled by user at {i}/{total}.", flush=True)
+                break
             exists = _cached_exists(conn, name, EDSM_CACHE_MAX_AGE_DAYS)
             if exists is not None:
                 cache_hits += 1
@@ -307,9 +327,14 @@ def validate_candidates(
                     exists = client.exists_system(name)
                     api_calls += 1
                 except Exception as exc:
-                    print(f"  WARNING: EDSM error for {name!r}: {exc}", flush=True)
-                    exists = False
+                    # A failed check is NOT the same as "confirmed absent from
+                    # EDSM" -- exclude it rather than silently keeping it as a
+                    # candidate, and don't cache the failure (it may be a
+                    # transient/environmental issue, not a real EDSM answer).
+                    print(f"  WARNING: EDSM check failed for {name!r}: {exc}", flush=True)
                     api_errors += 1
+                    check_failed.append(name)
+                    continue
                 _write_cache(conn, name, exists)
                 conn.commit()
 
@@ -329,10 +354,51 @@ def validate_candidates(
     finally:
         conn.close()
 
+    if check_failed:
+        print(
+            f"\n  WARNING: {len(check_failed)} candidate(s) could not be checked "
+            f"against EDSM (excluded from results, not kept): "
+            f"{', '.join(check_failed[:10])}"
+            f"{' ...' if len(check_failed) > 10 else ''}"
+        )
+
     elapsed = time.time() - start
     print()
     print(f"  Validation complete: {total} checked, {len(kept)} undiscovered, {elapsed:.0f}s")
     return kept
+
+
+# =============================================================================
+# CSV output (mirrors gap_extrapolate_export.py's per-phase CSV schema so
+# results can be merged across sectors/scripts by scripts/aggregate_gap_master_list.py)
+# =============================================================================
+
+def write_full_csv(out_path: Path, candidates: list[str], dry_run: bool) -> None:
+    edsm_status = "skipped" if dry_run else "not_in_edsm"
+    rows = []
+    for name in candidates:
+        parsed = _parse_sequence_name(name)
+        if parsed is None:
+            family, prefix, number = "", "", ""
+        else:
+            family, prefix, number = parsed
+        rows.append((name, family, prefix, number))
+
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "system_name", "edsm_status", "direction", "steps_from_edge",
+            "spansh_edge_number", "family", "subsector", "mass_prefix", "number",
+        ])
+        for name, family, prefix, number in sorted(rows, key=lambda r: _parse_sort_key(r[0])):
+            tokens = [t for t in name.split() if t]
+            idx = _find_subsector_index(tokens)
+            subsector = tokens[idx] if idx is not None else ""
+            writer.writerow([
+                name, edsm_status, "bracketed_gap", "", "",
+                family, subsector, prefix.rstrip("-"), number,
+            ])
+    print(f"  CSV:  {out_path}  ({len(rows)} rows)")
 
 
 # =============================================================================
@@ -345,6 +411,8 @@ def run(
     out_dir: Path,
     dry_run: bool,
     cache_db_path: Optional[Path],
+    max_bracket_width: Optional[int] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Path:
     sector = sector.strip()
     print(f"Gap Full Export")
@@ -352,6 +420,7 @@ def run(
     print(f"  Sector:     {sector!r}")
     print(f"  Output dir: {out_dir}")
     print(f"  Dry run:    {dry_run}")
+    print(f"  Max bracket width: {max_bracket_width if max_bracket_width is not None else 'unlimited'}")
     print()
 
     # --- Phase 1: Load systems ---
@@ -389,7 +458,7 @@ def run(
     for (fam, pfx), nums in top:
         print(f"    {fam} {pfx}  [{min(nums)}-{max(nums)}]  {len(nums)} known")
 
-    candidates_raw = _generate_gaps(sequences)
+    candidates_raw = _generate_gaps(sequences, max_bracket_width=max_bracket_width)
     # Deduplicate and remove any that already exist as known systems
     known_names = set(names)
     candidates_unique = [c for c in dict.fromkeys(candidates_raw) if c not in known_names]
@@ -399,7 +468,9 @@ def run(
     print()
     print("Phase 3: EDSM validation...")
     effective_cache = cache_db_path or db_path  # default: cache in source DB
-    validated = validate_candidates(candidates_unique, effective_cache, dry_run=dry_run)
+    validated = validate_candidates(
+        candidates_unique, effective_cache, dry_run=dry_run, cancel_event=cancel_event
+    )
 
     # --- Phase 4: Sort and write output ---
     print()
@@ -413,6 +484,9 @@ def run(
     suffix = "_dry_run" if dry_run else "_validated"
     out_filename = f"{sector_slug}_gap_full{suffix}.md"
     out_path = out_dir / out_filename
+
+    csv_path = out_dir / f"{sector_slug}_gap_full{suffix}.csv"
+    write_full_csv(csv_path, validated_sorted, dry_run)
 
     now = datetime.now(timezone.utc).isoformat()
     with out_path.open("w", encoding="utf-8") as f:
@@ -509,6 +583,12 @@ Examples:
         "--dry-run", action="store_true",
         help="Skip EDSM validation; output all generated candidates",
     )
+    parser.add_argument(
+        "--max-bracket-width", type=int, default=25,
+        help="Skip gaps between consecutive known systems wider than this many "
+             "numbers (default: 25; matches docs/gap-finder.md's max_step). "
+             "Use 0 or a negative number for unlimited width.",
+    )
 
     args = parser.parse_args()
 
@@ -518,10 +598,13 @@ Examples:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    max_bracket_width = args.max_bracket_width if args.max_bracket_width and args.max_bracket_width > 0 else None
+
     out_path = run(
         db_path=args.db,
         sector=args.sector,
         out_dir=args.out_dir,
+        max_bracket_width=max_bracket_width,
         dry_run=args.dry_run,
         cache_db_path=args.cache_db,
     )
