@@ -14,6 +14,35 @@ original design rationale (note: that document describes a more elaborate
 scoring model than what's actually implemented — see
 [Relationship to docs/gap-finder.md](#relationship-to-docsgap-findermd) below).
 
+## Installation (end users)
+
+If you just want to run the app rather than work with the scripts directly:
+
+1. Download the latest installer (`SectorGapAnalyzer-Setup-X.Y.Z.exe`) from this
+   repo's [Releases](../../releases) page and run it. It installs per-user (no
+   admin rights needed) and adds a Desktop/Start Menu shortcut. Since the
+   installer and app aren't code-signed, Windows SmartScreen will show
+   "Windows protected your PC" — click **More info → Run anyway**.
+2. Download your own copy of the full Spansh galaxy dump — `galaxy.json.gz`,
+   the **full/all-systems** dump, not the "populated systems only" one (see
+   [Source data](#1-source-data-the-galaxy-dump) below) — and save it to:
+   ```
+   %LOCALAPPDATA%\SectorGapAnalyzer\workspace\source_data\galaxy.json.gz
+   ```
+   That's the default the app already looks for, so placing it there means
+   the Settings tab needs no changes. If you'd rather keep your dump
+   somewhere else (e.g. shared across other projects), use the **Browse**
+   button in the Settings tab to point at it instead.
+3. Launch **Sector Gap Analyzer** from the Desktop shortcut. Check the
+   Settings tab (workspace folder + galaxy dump path), then use the Run tab:
+   add one or more sector names, pick which stages to run, and hit Run. The
+   app will refuse to start (and jump you to Settings) if the galaxy dump
+   path doesn't point to a real file.
+
+Building from source instead (for development, or to build your own
+installer) is covered in [Dependencies](#dependencies) and
+[Building a release](#building-a-release) below.
+
 ## How candidates are generated
 
 Elite Dangerous procedural system names follow a `<Sector> <Subsector> <mass
@@ -169,22 +198,50 @@ precise than that.
 
 ## Dependencies
 
-No `requirements.txt` exists yet; install what you need directly:
+For running from source: `pip install -r requirements.txt`. For building the
+packaged app/installer yourself: `pip install -r requirements-dev.txt` (adds
+PyInstaller on top of the runtime requirements).
 
 - **Python 3.10+** (uses `from __future__ import annotations`, PEP 604 unions
   in a few places).
 - **`ijson`** — required for extraction whenever the source dump is a JSON
   array document rather than JSON Lines (this is the case for Spansh's full
-  dump). `pip install ijson`. Performance depends heavily on backend — check
-  which one you have with `python -c "import ijson; print(ijson.backend)"`;
-  `yajl2_c` (a compiled C backend) is dramatically faster than the pure-
-  Python fallback.
-- **`aiohttp`** — only needed by `scripts/sector_survey.py` and
-  `scripts/pencil_sector_survey.py` for querying the Spansh systems-search
-  API. Not required for extraction or for the gap/extrapolation scripts,
-  which use the standard library `urllib` against EDSM.
-- Everything else (`sqlite3`, `csv`, `json`, `argparse`, ...) is standard
-  library.
+  dump). Performance depends heavily on backend — check which one you have
+  with `python -c "import ijson; print(ijson.backend)"`; `yajl2_c` (a
+  compiled C backend) is dramatically faster than the pure-Python fallback.
+- **`aiohttp`** (not in requirements.txt — install separately if needed) —
+  only used by `scripts/sector_survey.py` and `scripts/pencil_sector_survey.py`
+  for querying the Spansh systems-search API. Not required for extraction or
+  for the gap/extrapolation scripts or the GUI, which use the standard
+  library `urllib` against EDSM.
+- Everything else (`sqlite3`, `csv`, `json`, `argparse`, `tkinter`, ...) is
+  standard library.
+
+**Troubleshooting: EDSM calls fail with an SSL/certificate error.** This
+usually means antivirus software with TLS/HTTPS inspection (e.g. Norton Web
+Shield) is intercepting the connection with a certificate Python doesn't
+trust. Try `pip install pip-system-certs`, which makes Python defer to the
+Windows certificate store (where such software's inspection root is usually
+already trusted) — not a hard dependency, just a fix for this specific
+environment issue if you hit it.
+
+## Building a release
+
+Packaging is manual (no CI currently) — from a Windows machine with
+[Inno Setup](https://jrsoftware.org/isinfo.php) installed:
+
+```bash
+pip install -r requirements-dev.txt
+pyinstaller SectorGapAnalyzer.spec --clean
+iscc installer.iss
+```
+
+This produces `dist/SectorGapAnalyzer/` (the onedir PyInstaller build) and
+then `dist-installer/SectorGapAnalyzer-Setup-X.Y.Z.exe` (the installer, via
+`installer.iss`). Bump `MyAppVersion` in `installer.iss` before building a new
+release. Neither `dist/` nor `dist-installer/` are committed to git (see
+`.gitignore`) — attach the built installer `.exe` to a new GitHub Release
+instead; it's a compiled binary and doesn't belong in git history.
 
 ## Repository layout
 
@@ -198,6 +255,19 @@ scripts/
   sector_survey.py                      High-value system survey for an extracted sector DB (independent of gap pipeline)
   pencil_sector_survey.py               One-off hardcoded survey script for the Pencil Sector (not general-purpose)
   offline_gap_lists.py                  NOT CURRENTLY FUNCTIONAL — see note below
+
+gui/
+  app.py           Tkinter window: sector list, stage/parameter options, Run/Cancel, live log, Settings tab
+  worker.py        Background-thread job runner (stdout capture, cooperative cancellation)
+  pipeline.py      Orchestrates the scripts/ pipeline per sector for the GUI
+  config.py        Persisted settings (%APPDATA%\SectorGapAnalyzer\config.json)
+  main.py          Entry point (`python -m gui.main`, and the PyInstaller build target)
+
+SectorGapAnalyzer.spec   PyInstaller build spec (onedir, custom icon)
+installer.iss            Inno Setup script that wraps the PyInstaller build into an installer
+icon.ico / icon.png       App icon (.ico is what's actually embedded in the build)
+requirements.txt          Runtime dependencies
+requirements-dev.txt      Adds build-time dependencies (PyInstaller) on top of requirements.txt
 
 data/sector_library/     Extracted per-sector SQLite DBs (gitignored: *.sqlite)
 out/                     Generated candidate CSVs/Markdown reports (gitignored)

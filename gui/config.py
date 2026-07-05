@@ -15,9 +15,24 @@ from typing import Any
 
 APP_NAME = "SectorGapAnalyzer"
 
+
+def _default_workspace_dir() -> str:
+    """Per-user writable workspace, independent of wherever the app itself is
+    installed -- there's no git checkout to anchor to for an installed app."""
+    base = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+    return str(base / APP_NAME / "workspace")
+
+
+def _default_galaxy_dump_path() -> str:
+    """Default location a fresh user is told (see README) to save their galaxy
+    dump to, so Settings needs no changes out of the box. Anyone keeping their
+    dump elsewhere (e.g. for use across multiple projects) can browse to it."""
+    return str(Path(_default_workspace_dir()) / "source_data" / "galaxy.json.gz")
+
+
 DEFAULT_CONFIG: dict[str, Any] = {
-    "project_dir": "g:/sector-gap-analyzer",
-    "galaxy_dump_path": "G:/source-data-master/galaxy.json.gz",
+    "project_dir": _default_workspace_dir(),
+    "galaxy_dump_path": _default_galaxy_dump_path(),
     "sectors": [],
     "max_bracket_width": 25,
     "extend_depth": 5,

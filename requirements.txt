@@ -1,0 +1,10 @@
+# Runtime dependencies for the extraction/gap-analysis pipeline and GUI.
+# ijson is required to stream the Spansh galaxy dump (a JSON-array document);
+# for best performance confirm the compiled C backend is available:
+#   python -c "import ijson; print(ijson.backend)"   # should print yajl2_c
+ijson>=3.2
+
+# Not listed here (install separately only if you need them):
+#   aiohttp   - used only by scripts/sector_survey.py and
+#               scripts/pencil_sector_survey.py (Spansh API queries), not by
+#               the core extraction/gap-analysis pipeline or the GUI.

@@ -5,3 +5,4 @@ data/source_data/
 out/
 build/
 dist/
+dist-installer/

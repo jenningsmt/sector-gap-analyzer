@@ -1,0 +1,5 @@
+# Build-time dependencies, for producing the packaged executable/installer.
+# Not needed by end users running a prebuilt installer -- only for building
+# from source (see README "Building a release").
+-r requirements.txt
+pyinstaller>=6.0

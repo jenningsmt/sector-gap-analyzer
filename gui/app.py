@@ -25,13 +25,13 @@ class App:
         self.worker = Worker()
         self.config: dict[str, Any] = config_module.load_config()
 
-        notebook = ttk.Notebook(root)
-        notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.run_tab = ttk.Frame(notebook)
-        self.settings_tab = ttk.Frame(notebook)
-        notebook.add(self.run_tab, text="Run")
-        notebook.add(self.settings_tab, text="Settings")
+        self.run_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.run_tab, text="Run")
+        self.notebook.add(self.settings_tab, text="Settings")
 
         self._build_run_tab(self.run_tab)
         self._build_settings_tab(self.settings_tab)
@@ -218,6 +218,26 @@ class App:
         if not cfg["sectors"]:
             messagebox.showwarning("No sectors", "Add at least one sector before running.")
             return
+
+        project_dir = cfg["project_dir"].strip()
+        if not project_dir:
+            messagebox.showerror("Settings needed", "Set a project/workspace directory in the Settings tab first.")
+            self.notebook.select(self.settings_tab)
+            return
+        Path(project_dir).mkdir(parents=True, exist_ok=True)
+
+        galaxy_dump_path = cfg["galaxy_dump_path"].strip()
+        if not galaxy_dump_path or not Path(galaxy_dump_path).exists():
+            messagebox.showerror(
+                "Galaxy dump not found",
+                "No galaxy dump file found at:\n\n"
+                f"{galaxy_dump_path or '(not set)'}\n\n"
+                "Download the full Spansh galaxy dump (galaxy.json.gz) and save it there, "
+                "or use Browse in the Settings tab to point at your own copy.",
+            )
+            self.notebook.select(self.settings_tab)
+            return
+
         config_module.save_config(cfg)
 
         self._append_log(f"--- Starting run: {', '.join(cfg['sectors'])} ---")
