@@ -14,6 +14,8 @@ original design rationale (note: that document describes a more elaborate
 scoring model than what's actually implemented — see
 [Relationship to docs/gap-finder.md](#relationship-to-docsgap-findermd) below).
 
+![Sector Gap Analyzer — Run tab](docs/images/screenshot.png)
+
 ## Installation (end users)
 
 If you just want to run the app rather than work with the scripts directly:
@@ -396,6 +398,32 @@ schema so `aggregate_gap_master_list.py` can merge them:
 | `subsector` | Just the subsector token, e.g. `FG-Y` |
 | `mass_prefix` | The mass-code letter+digit, e.g. `d1` |
 | `number` | The candidate's trailing number |
+
+**Sample output**: [`sample_master_gap_candidates.csv`](docs/samples/sample_master_gap_candidates.csv)
+/ [`.md`](docs/samples/sample_master_gap_candidates.md) — real, EDSM-validated
+output for one sector (Flaming Star Sector, 47 candidates), included as a
+concrete example of what `aggregate_gap_master_list.py` produces. A short
+excerpt of the Markdown version:
+
+```markdown
+# Master Gap / Extrapolation Candidate List
+
+Total candidates (not in EDSM): 47
+
+## Summary
+
+| Sector | Bracketed Gap | Backward Extrap | Forward Extrap | Total |
+|--------|--------------:|-----------------:|----------------:|------:|
+| flaming_star_sector | 19 | 28 | 0 | 47 |
+
+## flaming_star_sector
+
+### Bracketed Gaps (intra-sequence)
+
+**Flaming Star Sector GW-W** (1):
+
+  - Flaming Star Sector GW-W d1-1
+```
 
 ## Caveats
 
