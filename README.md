@@ -410,3 +410,35 @@ schema so `aggregate_gap_master_list.py` can merge them:
 - EDSM's 1 request/second throttle means validation time scales with
   candidate volume; always check with `--dry-run` before a full run on an
   unfamiliar sector.
+
+## Acknowledgments
+
+This project exists only because of data and infrastructure built and
+maintained by others, freely made available to the community:
+
+- **[Spansh](https://spansh.co.uk/)**, created and maintained by **Gareth
+  Harper** — the galaxy dumps this project's entire extraction pipeline is
+  built on. Every sector this tool has ever analyzed started as a Spansh
+  export.
+- **[EDSM](https://www.edsm.net/)** (Elite Dangerous Star Map) and its
+  maintainers — the API this tool queries to validate every candidate
+  system before it's ever suggested to a player.
+- **[EDDN](https://eddn.edcd.io/)** (Elite Dangerous Data Network) and the
+  wider **[EDCD](https://github.com/EDCD)** community — the real-time,
+  crowdsourced data network that Spansh, EDSM, and the broader third-party
+  tool ecosystem are all ultimately built on top of.
+- The Elite Dangerous commander community at large — every system this
+  project's analysis is built on exists because a player chose to explore
+  it and *voluntarily* submit that discovery through an EDDN-compatible
+  tool. None of this works without that ongoing, uncompensated community
+  contribution.
+
+## Legal
+
+*Elite Dangerous* is a trademark and copyright of **Frontier Developments
+plc**, all rights reserved. This is an unofficial, fan-made tool built by a
+player of the game; it is not affiliated with, endorsed by, or sponsored by
+Frontier Developments in any way. All Elite Dangerous game data, names, and
+imagery referenced here are the property of Frontier Developments plc — see
+their fan content policy (on their website) for the terms this project
+operates under.
