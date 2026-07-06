@@ -18,13 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-try:
-    from app.config import get_sector_library_dir, resolve_sector_db_path
-except Exception:
-    get_sector_library_dir = None
-    resolve_sector_db_path = None
-
-
 def _default_input_path() -> Path:
     env_path = os.getenv("MFI_GALAXY_DUMP")
     if env_path:
@@ -37,16 +30,12 @@ def _default_input_path() -> Path:
 
 
 DEFAULT_INPUT = _default_input_path()
-_default_library = None
-if get_sector_library_dir is not None:
-    _default_library = get_sector_library_dir()
+
+_override = os.getenv("MFI_SECTOR_LIBRARY_DIR")
+if _override:
+    DEFAULT_OUTPUT_DIR = Path(_override)
 else:
-    _override = os.getenv("MFI_SECTOR_LIBRARY_DIR")
-    if _override:
-        _default_library = Path(_override)
-    else:
-        _default_library = Path(__file__).resolve().parents[1] / "data" / "sector_library"
-DEFAULT_OUTPUT_DIR = _default_library
+    DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "sector_library"
 DEFAULT_COMMIT_EVERY_SYSTEMS = 20000
 DEFAULT_COMMIT_EVERY_BODIES = 100000
 DEFAULT_COMMIT_EVERY_RINGS = 100000
@@ -269,12 +258,17 @@ def iter_systems_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
 
 
 def iter_systems_json_doc(path: Path) -> Iterable[Dict[str, Any]]:
-    print("Detected JSON array document; streaming via ijson.")
     try:
         import ijson
     except ImportError as exc:
         raise RuntimeError("Install ijson for JSON array streaming: pip install ijson") from exc
-    with gzip.open(path, "rb") as handle:
+    # yajl2_c (compiled C backend) is dramatically faster than the pure-Python
+    # fallback -- on a 100+ GB dump the difference is hours. Logged so a slow
+    # run can be diagnosed (e.g. a build whose ijson lacked the compiled
+    # extension) without needing to inspect the environment directly.
+    print(f"Detected JSON array document; streaming via ijson (backend={ijson.backend}).")
+    opener = gzip.open if path.suffix.lower() == ".gz" else open
+    with opener(path, "rb") as handle:
         for obj in ijson.items(handle, "item"):
             if isinstance(obj, dict):
                 yield obj
@@ -534,11 +528,8 @@ def run(
         return 1
 
     if not output_db:
-        if resolve_sector_db_path is not None:
-            output_db = resolve_sector_db_path(sector_prefix)
-        else:
-            sanitized = sanitize_prefix(sector_prefix)
-            output_db = DEFAULT_OUTPUT_DIR / f"sector_{sanitized}.sqlite"
+        sanitized = sanitize_prefix(sector_prefix)
+        output_db = DEFAULT_OUTPUT_DIR / f"sector_{sanitized}.sqlite"
 
     db_path = Path(output_db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -549,7 +540,11 @@ def run(
         return 1
 
     conn = sqlite3.connect(db_path)
-    init_db(conn)
+    try:
+        init_db(conn)
+    except Exception:
+        conn.close()
+        raise
 
     systems_scanned = 0
     systems_written = 0

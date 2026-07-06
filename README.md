@@ -21,8 +21,11 @@ If you just want to run the app rather than work with the scripts directly:
 1. Download the latest installer (`SectorGapAnalyzer-Setup-X.Y.Z.exe`) from this
    repo's [Releases](../../releases) page and run it. It installs per-user (no
    admin rights needed) and adds a Desktop/Start Menu shortcut. Since the
-   installer and app aren't code-signed, Windows SmartScreen will show
-   "Windows protected your PC" — click **More info → Run anyway**.
+   installer and app aren't code-signed, Windows SmartScreen (and possibly
+   your antivirus) will treat it with suspicion the first time — see
+   [Antivirus and SmartScreen warnings](#antivirus-and-smartscreen-warnings)
+   below before you download, so you know what to expect and how to verify
+   the file.
 2. Download your own copy of the full Spansh galaxy dump — `galaxy.json.gz`,
    the **full/all-systems** dump, not the "populated systems only" one (see
    [Source data](#1-source-data-the-galaxy-dump) below) — and save it to:
@@ -42,6 +45,73 @@ If you just want to run the app rather than work with the scripts directly:
 Building from source instead (for development, or to build your own
 installer) is covered in [Dependencies](#dependencies) and
 [Building a release](#building-a-release) below.
+
+## Antivirus and SmartScreen warnings — what to expect and what to do
+
+Sector Gap Analyzer is a small open-source tool. Its releases are currently
+**not code-signed** (code-signing certificates are expensive and reputation
+takes time to build), so Windows and some antivirus products will treat the
+installer with suspicion the first time they see it. **This is expected and
+does not mean anything is wrong with the file** — it means Windows has never
+seen this exact file before and no publisher identity is attached to it.
+You can (and should) verify the download yourself; instructions below.
+
+### First: verify your download
+
+Every release on the [Releases](../../releases) page lists a SHA-256
+checksum for the installer. After downloading, open PowerShell and run:
+
+    Get-FileHash .\SectorGapAnalyzer-Setup-X.Y.Z.exe -Algorithm SHA256
+
+If the hash printed matches the one in the release notes, your file is
+byte-for-byte the one the maintainer published, and the warnings below are
+safe to click through. If it does **not** match, delete the file and
+re-download from the Releases page only — never from a third-party mirror.
+
+### "Windows protected your PC" (SmartScreen) — blue dialog
+
+This appears because the installer is new and unsigned, not because
+anything harmful was detected. If your checksum matched:
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+That's it — SmartScreen only gates the first run.
+
+### Your antivirus flags, quarantines, or deletes the file
+
+Some antivirus products go further than a warning and quarantine the
+installer or the installed `SectorGapAnalyzer.exe`. This is a **false
+positive** with a known cause: the app is packaged with PyInstaller (a
+standard tool that bundles a Python program and the Python runtime into an
+exe), and because some actual malware is also built with PyInstaller, a few
+antivirus engines flag *everything* built with it. See PyInstaller's own
+[note on antivirus false positives](https://github.com/pyinstaller/pyinstaller/blob/develop/.github/ISSUE_TEMPLATE/antivirus.md).
+
+If this happens:
+
+1. **Verify the checksum first** (above). Only proceed if it matches.
+2. **Restore the file from quarantine** using your AV's quarantine/history
+   screen (the wording varies: "Restore", "Allow", "Not a threat").
+3. **Add an exclusion** so it doesn't recur — either for the installer
+   file, or (after installing) for the app folder:
+   `%LOCALAPPDATA%\Programs\SectorGapAnalyzer`
+   In Windows Security this is under: Virus & threat protection →
+   Manage settings → Exclusions → Add or remove exclusions.
+4. Optionally, **report the false positive** to your AV vendor — this
+   genuinely helps: enough reports get the file whitelisted for everyone.
+
+**Never add exclusions for files whose checksum you haven't verified.**
+The verify-then-restore order matters: the checksum is what tells you the
+flagged file really is the one published here.
+
+### Why not just sign the releases?
+
+Code signing is a possible future improvement (e.g. via
+[SignPath Foundation](https://signpath.org/), which offers free signing for
+qualifying open-source projects) but isn't in place yet. Until then,
+checksums + this documentation are the interim answer. If a release is ever
+signed, this section will be updated.
 
 ## How candidates are generated
 
@@ -231,17 +301,28 @@ Packaging is manual (no CI currently) — from a Windows machine with
 [Inno Setup](https://jrsoftware.org/isinfo.php) installed:
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-build.lock
 pyinstaller SectorGapAnalyzer.spec --clean
 iscc installer.iss
 ```
 
+`requirements-build.lock` pins the exact dependency versions an official
+release was built with (unlike `requirements.txt`/`requirements-dev.txt`,
+which use minimum-version ranges for general development). Record the Python
+version used in the release notes alongside it. Optionally set
+`SOURCE_DATE_EPOCH` (to the release's Unix timestamp) before building for
+closer build-output reproducibility — PyInstaller otherwise embeds the
+current time.
+
 This produces `dist/SectorGapAnalyzer/` (the onedir PyInstaller build) and
 then `dist-installer/SectorGapAnalyzer-Setup-X.Y.Z.exe` (the installer, via
-`installer.iss`). Bump `MyAppVersion` in `installer.iss` before building a new
-release. Neither `dist/` nor `dist-installer/` are committed to git (see
-`.gitignore`) — attach the built installer `.exe` to a new GitHub Release
-instead; it's a compiled binary and doesn't belong in git history.
+`installer.iss`). Bump `MyAppVersion` in `installer.iss` **and** `filevers`/
+`prodvers`/`FileVersion`/`ProductVersion` in `version_info.txt` together
+before building a new release. Neither `dist/`, `dist-installer/` are
+committed to git (see `.gitignore`) — attach the built installer `.exe` to a
+new GitHub Release instead, along with its SHA-256 checksum
+(`Get-FileHash .\SectorGapAnalyzer-Setup-X.Y.Z.exe -Algorithm SHA256`); it's
+a compiled binary and doesn't belong in git history.
 
 ## Repository layout
 
@@ -254,7 +335,6 @@ scripts/
   aggregate_gap_master_list.py          Merge per-sector CSVs into one master candidate list
   sector_survey.py                      High-value system survey for an extracted sector DB (independent of gap pipeline)
   pencil_sector_survey.py               One-off hardcoded survey script for the Pencil Sector (not general-purpose)
-  offline_gap_lists.py                  NOT CURRENTLY FUNCTIONAL — see note below
 
 gui/
   app.py           Tkinter window: sector list, stage/parameter options, Run/Cancel, live log, Settings tab
@@ -272,19 +352,22 @@ requirements-dev.txt      Adds build-time dependencies (PyInstaller) on top of r
 data/sector_library/     Extracted per-sector SQLite DBs (gitignored: *.sqlite)
 out/                     Generated candidate CSVs/Markdown reports (gitignored)
 docs/gap-finder.md       Original design document / methodology notes
-planner/, tests/         Leftover from a prior reorg — see note below
 ```
 
-### A note on `planner/`, `tests/`, and `offline_gap_lists.py`
+### A note on removed leftover code
 
-This repo was split out from a larger project (`edmfi-mfi`). `planner/`
+This repo was originally split out from a larger project (`edmfi-mfi`), and
+for a while carried three leftover pieces from that split: `planner/`
 (imported elsewhere as `planner_strategic`), `tests/test_strategic_planner.py`,
-and `scripts/offline_gap_lists.py` all reference modules that don't exist in
-this repo (`app.config`, `planner_strategic`) and are **not currently
-runnable** here. The actively-used, self-contained pipeline is everything
-listed under "Repository layout" above except those three. Treat `planner/`
-and `tests/` as reference material from the source project rather than
-working code, unless/until they're reconnected or rewritten.
+and `scripts/offline_gap_lists.py`. All three referenced modules that never
+existed in this repo (`app.config`, `planner_strategic`) and could not be
+imported or run here. They've since been deleted rather than left in place —
+notably, `planner/edsm.py` contained a second, unreachable copy of an EDSM
+error-handling bug (silently treating a failed API check as "confirmed not
+in EDSM," and caching that false negative) that was already found and fixed
+in the actively-used pipeline; keeping a dead copy of the same bug around
+was a landmine for anyone who might have reconnected that code later. The
+full pipeline is everything listed under "Repository layout" above.
 
 ### Relationship to `docs/gap-finder.md`
 

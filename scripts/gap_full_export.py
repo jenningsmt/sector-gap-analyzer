@@ -63,6 +63,14 @@ EDSM_BACKOFF_BASE = 0.5
 EDSM_CACHE_MAX_AGE_DAYS = 7
 
 
+class NoSequencedSystemsError(Exception):
+    """Raised by run() when a sector DB has no matching/sequenced systems.
+
+    Deliberately NOT a sys.exit() -- run() is called directly by the GUI for
+    one sector at a time in a multi-sector batch, and one bad sector name
+    must not abort the rest of the batch. main() catches this and exits 1.
+    """
+
 
 # =============================================================================
 # Name parsing (mirrors planner_strategic/candidates.py exactly)
@@ -415,6 +423,7 @@ def run(
     cancel_event: Optional[threading.Event] = None,
 ) -> Path:
     sector = sector.strip()
+    out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Gap Full Export")
     print(f"  Source DB:  {db_path}")
     print(f"  Sector:     {sector!r}")
@@ -425,20 +434,23 @@ def run(
 
     # --- Phase 1: Load systems ---
     print("Phase 1: Loading systems from sector DB...")
+    like = sector.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " %"
     conn = sqlite3.connect(str(db_path))
-    like = sector + " %"
-    rows = conn.execute(
-        "SELECT name FROM systems WHERE LOWER(name) LIKE LOWER(?)",
-        (like,),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM systems WHERE LOWER(name) LIKE LOWER(?) ESCAPE '\\'",
+            (like,),
+        ).fetchall()
+    finally:
+        conn.close()
 
     names = [row[0] for row in rows]
     print(f"  {len(names)} systems loaded matching {like!r}")
 
     if not names:
-        print("ERROR: No systems found. Check --sector matches the sector name in the DB.")
-        sys.exit(1)
+        raise NoSequencedSystemsError(
+            f"No systems found for sector {sector!r}. Check --sector matches the sector name in the DB."
+        )
 
     # --- Phase 2: Build sequences and generate candidates ---
     print()
@@ -448,9 +460,11 @@ def run(
     print(f"  {families_with_sequences} sequence families found")
 
     if not sequences:
-        print("ERROR: No sequenced system names found (names without trailing -N pattern).")
-        print("Gap analysis requires systems of the form 'Sector XX-Y zN-M'.")
-        sys.exit(1)
+        raise NoSequencedSystemsError(
+            f"No sequenced system names found for sector {sector!r} "
+            "(names without trailing -N pattern). Gap analysis requires "
+            "systems of the form 'Sector XX-Y zN-M'."
+        )
 
     # Show top families
     top = sorted(sequences.items(), key=lambda kv: -len(kv[1]))[:10]
@@ -600,14 +614,18 @@ Examples:
 
     max_bracket_width = args.max_bracket_width if args.max_bracket_width and args.max_bracket_width > 0 else None
 
-    out_path = run(
-        db_path=args.db,
-        sector=args.sector,
-        out_dir=args.out_dir,
-        max_bracket_width=max_bracket_width,
-        dry_run=args.dry_run,
-        cache_db_path=args.cache_db,
-    )
+    try:
+        out_path = run(
+            db_path=args.db,
+            sector=args.sector,
+            out_dir=args.out_dir,
+            max_bracket_width=max_bracket_width,
+            dry_run=args.dry_run,
+            cache_db_path=args.cache_db,
+        )
+    except NoSequencedSystemsError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
     print()
     print(f"Done. Report: {out_path}")
 

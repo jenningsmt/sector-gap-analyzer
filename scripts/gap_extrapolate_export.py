@@ -81,6 +81,15 @@ EDSM_CACHE_MAX_AGE_DAYS = 7
 DEFAULT_EXTEND_DEPTH = 5
 
 
+class NoSequencedSystemsError(Exception):
+    """Raised by run() when a sector DB has no matching systems.
+
+    Deliberately NOT a sys.exit() -- run() is called directly by the GUI for
+    one sector at a time in a multi-sector batch, and one bad sector name
+    must not abort the rest of the batch. main() catches this and exits 1.
+    """
+
+
 # =============================================================================
 # Name parsing  (mirrors gap_full_export.py exactly)
 # =============================================================================
@@ -602,16 +611,19 @@ def write_chain_summary(
                 key = (family, prefix)
                 term_step = terminated_at.get(key)
                 f.write(
-                    f"| {family} {prefix.rstrip('-')} "
-                    f"| `{prefix}{peak.edge_number}` "
-                    f"| `{peak.system_name}` "
-                    f"| {peak.steps_from_edge} "
-                    f"| step {term_step} (not in EDSM) " if term_step else
-                    f"| {family} {prefix.rstrip('-')} "
-                    f"| `{prefix}{peak.edge_number}` "
-                    f"| `{peak.system_name}` "
-                    f"| {peak.steps_from_edge} "
-                    f"| depth limit reached "
+                    (
+                        f"| {family} {prefix.rstrip('-')} "
+                        f"| `{prefix}{peak.edge_number}` "
+                        f"| `{peak.system_name}` "
+                        f"| {peak.steps_from_edge} "
+                        f"| step {term_step} (not in EDSM) "
+                    ) if term_step else (
+                        f"| {family} {prefix.rstrip('-')} "
+                        f"| `{prefix}{peak.edge_number}` "
+                        f"| `{peak.system_name}` "
+                        f"| {peak.steps_from_edge} "
+                        f"| depth limit reached "
+                    )
                 )
                 f.write("| terminated |\n" if term_step else "| at depth limit |\n")
 
@@ -654,18 +666,22 @@ def run(
 
     # Load systems
     print("Loading systems from sector DB...")
+    like = sector.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " %"
     conn = sqlite3.connect(str(db_path))
-    rows = conn.execute(
-        "SELECT name FROM systems WHERE LOWER(name) LIKE LOWER(?)",
-        (sector + " %",),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT name FROM systems WHERE LOWER(name) LIKE LOWER(?) ESCAPE '\\'",
+            (like,),
+        ).fetchall()
+    finally:
+        conn.close()
 
     names = [row[0] for row in rows]
     print(f"  {len(names)} systems loaded")
     if not names:
-        print("ERROR: No systems found. Check --sector matches the sector name prefix in the DB.")
-        sys.exit(1)
+        raise NoSequencedSystemsError(
+            f"No systems found for sector {sector!r}. Check --sector matches the sector name prefix in the DB."
+        )
 
     known_names = set(names)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -837,16 +853,20 @@ Examples:
         )
         sys.exit(1)
 
-    run(
-        db_path=args.db,
-        sector=args.sector,
-        out_dir=args.out_dir,
-        extend_depth=args.extend_depth,
-        direction=args.direction,
-        max_forward_step=max_fwd,
-        dry_run=args.dry_run,
-        cache_db_path=args.cache_db,
-    )
+    try:
+        run(
+            db_path=args.db,
+            sector=args.sector,
+            out_dir=args.out_dir,
+            extend_depth=args.extend_depth,
+            direction=args.direction,
+            max_forward_step=max_fwd,
+            dry_run=args.dry_run,
+            cache_db_path=args.cache_db,
+        )
+    except NoSequencedSystemsError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
     print("\nDone.")
 
 

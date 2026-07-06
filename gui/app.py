@@ -14,6 +14,8 @@ from gui.worker import DONE_SENTINEL, Worker
 
 MAX_LOG_LINES = 5000
 POLL_INTERVAL_MS = 100
+SHUTDOWN_POLL_MS = 200
+SHUTDOWN_TIMEOUT_MS = 20000
 
 
 class App:
@@ -283,13 +285,40 @@ class App:
         self.root.after(POLL_INTERVAL_MS, self._poll_log_queue)
 
     def _on_close(self) -> None:
-        if self.worker.is_running():
-            if not messagebox.askyesno(
-                "Job running", "A job is still running. Cancel it and exit?"
+        if not self.worker.is_running():
+            self.root.destroy()
+            return
+        if not messagebox.askyesno(
+            "Job running",
+            "A job is still running. Cancel it and wait for it to stop before exiting?",
+        ):
+            return
+        self.worker.cancel()
+        self.run_button.configure(state="disabled")
+        self.cancel_button.configure(state="disabled")
+        self.status_label.configure(text="Cancelling -- please wait before closing...")
+        self._wait_for_shutdown(0)
+
+    def _wait_for_shutdown(self, elapsed_ms: int) -> None:
+        # Closing the window must not kill the worker thread mid-flight (it's
+        # a daemon thread; destroying root ends the process outright) -- wait
+        # for it to actually finish flushing/closing its db connections.
+        if not self.worker.is_running():
+            self.root.destroy()
+            return
+        if elapsed_ms >= SHUTDOWN_TIMEOUT_MS:
+            if messagebox.askyesno(
+                "Still running",
+                "The job hasn't stopped yet. Force quit anyway? This may leave "
+                "partially-written data in an inconsistent state.",
             ):
-                return
-            self.worker.cancel()
-        self.root.destroy()
+                self.root.destroy()
+            else:
+                self._wait_for_shutdown(0)
+            return
+        self.root.after(
+            SHUTDOWN_POLL_MS, lambda: self._wait_for_shutdown(elapsed_ms + SHUTDOWN_POLL_MS)
+        )
 
 
 def main() -> None:

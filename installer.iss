@@ -20,6 +20,8 @@ DefaultDirName={localappdata}\Programs\SectorGapAnalyzer
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+CloseApplications=yes
+RestartApplications=no
 OutputDir=dist-installer
 OutputBaseFilename=SectorGapAnalyzer-Setup-{#MyAppVersion}
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -28,8 +30,16 @@ Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 
+; Wipe the PyInstaller bundle directory before installing the new one, so an
+; upgrade can't accumulate files a prior release shipped but this one no
+; longer does (e.g. after a Python/PyInstaller version bump). User data lives
+; entirely outside {app} (%LOCALAPPDATA%\SectorGapAnalyzer\workspace and
+; %APPDATA%\SectorGapAnalyzer\config.json), so this never touches it.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
-Source: "dist\SectorGapAnalyzer\*"; DestDir: "{app}"; Flags: recursesubdirs
+Source: "dist\SectorGapAnalyzer\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -1,0 +1,18 @@
+# Exact pinned versions used to produce official release builds -- for
+# reproducibility of the packaged installer, not for general development
+# (use requirements.txt / requirements-dev.txt for that; those use minimum-
+# version ranges deliberately).
+#
+# To rebuild a specific release identically:
+#   pip install -r requirements-build.lock
+#   pyinstaller SectorGapAnalyzer.spec --clean
+#   iscc installer.iss
+#
+# Optionally set SOURCE_DATE_EPOCH before building for closer output
+# reproducibility (PyInstaller embeds build timestamps otherwise):
+#   set SOURCE_DATE_EPOCH=<unix timestamp of the release>
+#
+# Record the Python version used alongside these in the release notes
+# (this lock was generated with Python 3.13).
+ijson==3.4.0.post0
+pyinstaller==6.21.0

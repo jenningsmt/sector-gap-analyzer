@@ -63,12 +63,6 @@ except ImportError:
         upsert_systems,
     )
 
-try:
-    from app.config import resolve_sector_db_path
-except Exception:
-    resolve_sector_db_path = None
-
-
 class SectorSink:
     """Per-sector SQLite connection + pending row buffers."""
 
@@ -77,7 +71,11 @@ class SectorSink:
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
-        init_db(self.conn)
+        try:
+            init_db(self.conn)
+        except Exception:
+            self.conn.close()
+            raise
         self.system_rows: List[Dict] = []
         self.body_rows: List[Dict] = []
         self.ring_rows: List[Dict] = []
@@ -121,10 +119,7 @@ def build_sinks(
 ) -> List[SectorSink]:
     sinks = []
     for prefix in prefixes:
-        if resolve_sector_db_path is not None:
-            db_path = Path(resolve_sector_db_path(prefix))
-        else:
-            db_path = output_dir / f"sector_{sanitize_prefix(prefix)}.sqlite"
+        db_path = output_dir / f"sector_{sanitize_prefix(prefix)}.sqlite"
         print(f"  {prefix!r} -> {db_path}")
         sinks.append(SectorSink(prefix, db_path))
     return sinks

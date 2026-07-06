@@ -93,15 +93,18 @@ def run_pipeline(config: dict[str, Any], cancel_event: Optional[threading.Event]
 
         if stages.get("bracketed_gaps", True):
             print(f"  -- Bracketed gaps ({sector}) --")
-            gap_full_export.run(
-                db_path=db_path,
-                sector=sector,
-                out_dir=out_dir,
-                dry_run=dry_run,
-                cache_db_path=None,
-                max_bracket_width=config.get("max_bracket_width", 25),
-                cancel_event=cancel_event,
-            )
+            try:
+                gap_full_export.run(
+                    db_path=db_path,
+                    sector=sector,
+                    out_dir=out_dir,
+                    dry_run=dry_run,
+                    cache_db_path=None,
+                    max_bracket_width=config.get("max_bracket_width", 25),
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                print(f"  SKIP bracketed gaps for {sector!r}: {exc}")
             if _cancelled(cancel_event):
                 return 130
 
@@ -112,17 +115,20 @@ def run_pipeline(config: dict[str, Any], cancel_event: Optional[threading.Event]
                 "forward" if run_forward else "backward"
             )
             print(f"  -- Extrapolation ({sector}, direction={direction}) --")
-            gap_extrapolate_export.run(
-                db_path=db_path,
-                sector=sector,
-                out_dir=out_dir,
-                extend_depth=config.get("extend_depth", 5),
-                direction=direction,
-                max_forward_step=config.get("max_forward_step", 5),
-                dry_run=dry_run,
-                cache_db_path=None,
-                cancel_event=cancel_event,
-            )
+            try:
+                gap_extrapolate_export.run(
+                    db_path=db_path,
+                    sector=sector,
+                    out_dir=out_dir,
+                    extend_depth=config.get("extend_depth", 5),
+                    direction=direction,
+                    max_forward_step=config.get("max_forward_step", 5),
+                    dry_run=dry_run,
+                    cache_db_path=None,
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                print(f"  SKIP extrapolation for {sector!r}: {exc}")
             if _cancelled(cancel_event):
                 return 130
 
