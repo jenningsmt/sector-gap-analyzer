@@ -461,6 +461,30 @@ maintained by others, freely made available to the community:
   tool. None of this works without that ongoing, uncompensated community
   contribution.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org).
+
+**Privacy policy:** This program will not transfer any information to other
+networked systems unless specifically requested by the user or the person
+installing or operating it. The one exception is user-initiated: when you
+run the EDSM validation stage (checking whether a candidate system already
+exists), the tool sends candidate system names to the public
+[EDSM](https://www.edsm.net/) API — see
+[EDSM's privacy policy](https://www.edsm.net/en/faq/privacy-policy). No
+other pipeline stage, and no other part of the app, makes network calls.
+(Two optional scripts not included in the packaged GUI app —
+`scripts/sector_survey.py` and `scripts/pencil_sector_survey.py` —
+separately query the [Spansh](https://spansh.co.uk/) API.)
+
+**Team:**
+
+| Role | Member |
+|---|---|
+| Committers / Reviewers | jenningsmt |
+| Approvers | jenningsmt |
+
 ## Legal
 
 *Elite Dangerous* is a trademark and copyright of **Frontier Developments
