@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.sqlite
+data/sector_library/*.md
 data/source_data/
 out/
 build/

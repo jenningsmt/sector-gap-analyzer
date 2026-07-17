@@ -9,7 +9,7 @@
 ; attached to a GitHub Release, not committed to the repo.
 
 #define MyAppName "Sector Gap Analyzer"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppExeName "SectorGapAnalyzer.exe"
 
 [Setup]

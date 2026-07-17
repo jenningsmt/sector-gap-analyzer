@@ -1,6 +1,6 @@
 # Master Gap / Extrapolation Candidate List
 
-Generated: 2026-07-06T22:22:09.863366+00:00
+Generated: 2026-07-17T23:04:36.298716+00:00
 Sectors: 1
 Total candidates (not in EDSM): 47
 
@@ -8,9 +8,9 @@ Total candidates (not in EDSM): 47
 
 ## Summary
 
-| Sector | Bracketed Gap | Backward Extrap | Forward Extrap | Total |
-|--------|--------------:|-----------------:|----------------:|------:|
-| flaming_star_sector | 19 | 28 | 0 | 47 |
+| Sector | Bracketed Gap | Backward Extrap | Forward Extrap | Spatial Gap | Spatial Backward | Total |
+|--------|--------------:|-----------------:|----------------:|------------:|-----------------:|------:|
+| flaming_star_sector | 19 | 28 | 0 | 0 | 0 | 47 |
 
 ---
 
@@ -32,11 +32,6 @@ Total candidates (not in EDSM): 47
 
 **Flaming Star Sector IR-W** (12):
 
-  - Flaming Star Sector IR-W d1-10
-  - Flaming Star Sector IR-W d1-11
-  - Flaming Star Sector IR-W d1-12
-  - Flaming Star Sector IR-W d1-13
-  - Flaming Star Sector IR-W d1-14
   - Flaming Star Sector IR-W d1-2
   - Flaming Star Sector IR-W d1-3
   - Flaming Star Sector IR-W d1-4
@@ -44,6 +39,11 @@ Total candidates (not in EDSM): 47
   - Flaming Star Sector IR-W d1-6
   - Flaming Star Sector IR-W d1-7
   - Flaming Star Sector IR-W d1-8
+  - Flaming Star Sector IR-W d1-10
+  - Flaming Star Sector IR-W d1-11
+  - Flaming Star Sector IR-W d1-12
+  - Flaming Star Sector IR-W d1-13
+  - Flaming Star Sector IR-W d1-14
 
 **Flaming Star Sector QI-T** (3):
 
@@ -75,9 +75,9 @@ Total candidates (not in EDSM): 47
 
 **Flaming Star Sector EW-W** (3):
 
-  - Flaming Star Sector EW-W c1-2  *(step 1)*
-  - Flaming Star Sector EW-W c1-1  *(step 2)*
   - Flaming Star Sector EW-W c1-0  *(step 3)*
+  - Flaming Star Sector EW-W c1-1  *(step 2)*
+  - Flaming Star Sector EW-W c1-2  *(step 1)*
 
 **Flaming Star Sector FS-S** (1):
 
@@ -85,11 +85,11 @@ Total candidates (not in EDSM): 47
 
 **Flaming Star Sector FW-W** (5):
 
-  - Flaming Star Sector FW-W d1-6  *(step 1)*
-  - Flaming Star Sector FW-W d1-5  *(step 2)*
-  - Flaming Star Sector FW-W d1-4  *(step 3)*
-  - Flaming Star Sector FW-W d1-3  *(step 4)*
   - Flaming Star Sector FW-W d1-2  *(step 5)*
+  - Flaming Star Sector FW-W d1-3  *(step 4)*
+  - Flaming Star Sector FW-W d1-4  *(step 3)*
+  - Flaming Star Sector FW-W d1-5  *(step 2)*
+  - Flaming Star Sector FW-W d1-6  *(step 1)*
 
 **Flaming Star Sector HR-W** (1):
 
@@ -101,8 +101,8 @@ Total candidates (not in EDSM): 47
 
 **Flaming Star Sector LR-W** (2):
 
-  - Flaming Star Sector LR-W c1-1  *(step 1)*
   - Flaming Star Sector LR-W c1-0  *(step 2)*
+  - Flaming Star Sector LR-W c1-1  *(step 1)*
 
 **Flaming Star Sector LS-A** (1):
 
@@ -114,8 +114,8 @@ Total candidates (not in EDSM): 47
 
 **Flaming Star Sector LX-U** (2):
 
-  - Flaming Star Sector LX-U c2-1  *(step 1)*
   - Flaming Star Sector LX-U c2-0  *(step 2)*
+  - Flaming Star Sector LX-U c2-1  *(step 1)*
 
 **Flaming Star Sector MX-A** (1):
 

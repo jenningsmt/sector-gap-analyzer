@@ -137,11 +137,24 @@ numbers roughly in order, so gaps in the known numbers are informative:
   above a family's known maximum, chain-extended only while EDSM keeps
   confirming each step. Not currently part of the standard run for this
   project (see below) but available if needed.
+- **Spatial search** (`scripts/gap_spatial_export.py`) — the same bracketed-gap
+  and backward-extrapolation logic, but scoped to every system within a
+  chosen radius (light years) of a center system instead of an entire
+  sector prefix. Useful for a quick, targeted search around wherever you
+  currently are in-game rather than analyzing a whole sector. See
+  [Spatial search](#spatial-search) below.
 
 Every candidate is checked against the [EDSM](https://www.edsm.net/) API
 (`GET /api-v1/system?systemName=...`) and only kept if EDSM has no record of
 it — i.e. it's not just "missing from Spansh," it's missing everywhere we can
 cheaply check.
+
+The trailing token of a procedural name (e.g. `d1-23`) further breaks down
+into a **mass code** (`d`, one letter) and a **boxel** number (`1`) followed
+by a **serial** number (`23`). Output lists are sorted sector → subsector →
+mass code → boxel → serial — the order these tokens actually read in-game —
+so candidates near each other on the map land together, regardless of which
+method (bracketed gap, backward, spatial, etc.) found them.
 
 ## Pipeline
 
@@ -152,9 +165,13 @@ cheaply check.
 2. Extraction → data/sector_library/*.sqlite  — scripts/extract_sector_systems_to_sqlite.py
                                                  scripts/extract_multi_sector_to_sqlite.py (many sectors, one pass)
         │
+        ├──► Sector summary → sector_<slug>_summary.md   — scripts/sector_summary_export.py
+        │                                                   (GUI: automatic right after extraction)
         ▼
-3. Candidate generation + EDSM validation     — scripts/gap_full_export.py            (bracketed gaps)
-                                                 scripts/gap_extrapolate_export.py      (backward/forward)
+3. Candidate generation + EDSM validation     — scripts/gap_full_export.py            (bracketed gaps, whole sector)
+                                                 scripts/gap_extrapolate_export.py      (backward/forward, whole sector)
+                                                 scripts/gap_spatial_export.py          (bracketed gaps + backward,
+                                                                                          radius around a system)
         │
         ▼
 4. Cross-sector aggregation → out/            — scripts/aggregate_gap_master_list.py
@@ -225,6 +242,20 @@ Sector-prefix matching requires a token boundary (the prefix must be the
 whole system name or be followed by a space), so `"Oochost"` won't
 accidentally match an unrelated system starting with those same letters.
 
+### Sector summaries
+
+```bash
+python scripts/sector_summary_export.py \
+    --db data/sector_library/sector_outopps.sqlite --sector "Outopps"
+```
+
+Writes `data/sector_library/sector_<slug>_summary.md`: total systems/bodies/
+rings, median ring density per class, Earth-like-world and bio-signature
+hotspot subsector patterns, and a couple of "priority search" pointers
+derived from the strongest patterns. The GUI runs this automatically for
+every sector right after extraction; run it standalone if you extracted a
+sector before this existed, or want to refresh one.
+
 ### 3. Candidate generation + validation
 
 Run per sector, against its extracted DB:
@@ -252,21 +283,48 @@ always run `--dry-run` first — candidate volume (and therefore validation
 wall-clock time) can vary by orders of magnitude between sectors depending on
 how sparse and wide their naming families are.
 
+### Spatial search
+
+```bash
+python scripts/gap_spatial_export.py --db data/sector_library/sector_outopps.sqlite \
+    --sector "Outopps" --center-system "Outopps FG-Y d1-23" --radius-ly 20 --out-dir out
+```
+
+Requires the sector containing `--center-system` to already be extracted
+(step 2) — it doesn't touch the galaxy dump itself, only the sector DB. Finds
+every system within `--radius-ly` of the center system and runs bracketed-gap
+and backward-extrapolation candidate generation against just that
+neighborhood (`--direction bracketed_gap` / `backward` / `both`, default
+`both`). Writes `<slug>_spatial_gap_*` / `<slug>_spatial_backward_*` CSV +
+Markdown into `--out-dir`, picked up by the aggregator like any other sector
+output. In the GUI, switch the **Run** tab's Mode to **Spatial** and fill in
+Center system / Radius (ly) — the sector is auto-detected from the center
+system's name unless you set an override.
+
+Because the "known systems" universe for this search is deliberately
+restricted to the chosen radius, a real undiscovered system just outside
+that radius can occasionally surface as a false-positive backward candidate.
+EDSM validation still filters out anything that's actually a known system —
+this is a structural side effect of scoping the search spatially, not a bug.
+
 ### 4. Aggregation
 
 ```bash
 python scripts/aggregate_gap_master_list.py --out-dir out
 ```
 
-Scans `out/` for every sector's `*_gap_full_validated.csv` and
-`*_extrap_backward_validated.csv` / `*_extrap_forward_step*.csv`, keeps only
-rows EDSM has no record of (`edsm_status == not_in_edsm`), tags each with its
-sector and candidate type, and writes one combined
-`master_gap_candidates.csv` + `.md` — grouped by sector, then candidate type,
-then naming family. No composite "confidence score" is invented: ordering is
-structural (bracketed gaps, then backward extrapolation by proximity to the
-confirmed edge) because the underlying data doesn't support anything more
-precise than that.
+Scans `out/` for every sector's `*_gap_full_validated.csv`,
+`*_extrap_backward_validated.csv` / `*_extrap_forward_step*.csv`, and
+`*_spatial_gap_validated.csv` / `*_spatial_backward_validated.csv`, keeps
+only rows EDSM has no record of (`edsm_status == not_in_edsm`), tags each
+with its sector and candidate type, and writes one combined
+`master_gap_candidates.csv` + `.md` — grouped by sector, then subsector, then
+mass code, then boxel, then serial (the in-game reading order), so
+candidates near each other on the map land together regardless of which
+method found them. Candidate type and `steps_from_edge` only break ties
+within an identical location. No composite "confidence score" is invented —
+the underlying data doesn't support anything more precise than structural
+ordering.
 
 ## Dependencies
 
@@ -332,16 +390,20 @@ a compiled binary and doesn't belong in git history.
 scripts/
   extract_sector_systems_to_sqlite.py   Single-sector extraction from a galaxy dump
   extract_multi_sector_to_sqlite.py     Multi-sector extraction in one pass over the dump
+  sector_summary_export.py              Sector baseline summary report (ring/ELW/biosig stats), run after extraction
+  gap_naming.py                         Shared procedural-name parsing + sector/subsector/mass-code/boxel/serial sort key
   gap_full_export.py                    Bracketed intra-sequence gap candidates + EDSM validation
   gap_extrapolate_export.py             Backward/forward extrapolation candidates + EDSM validation
+  gap_spatial_export.py                 Bracketed gaps + backward extrapolation within a radius of a system
   aggregate_gap_master_list.py          Merge per-sector CSVs into one master candidate list
   sector_survey.py                      High-value system survey for an extracted sector DB (independent of gap pipeline)
   pencil_sector_survey.py               One-off hardcoded survey script for the Pencil Sector (not general-purpose)
 
 gui/
-  app.py           Tkinter window: sector list, stage/parameter options, Run/Cancel, live log, Settings tab
+  app.py           Tkinter window: Mode (Gap/Spatial), sector list or spatial search fields, stage/parameter
+                    options, Run/Cancel, live log, Settings tab
   worker.py        Background-thread job runner (stdout capture, cooperative cancellation)
-  pipeline.py      Orchestrates the scripts/ pipeline per sector for the GUI
+  pipeline.py      Orchestrates the scripts/ pipeline (sector or spatial mode) for the GUI
   config.py        Persisted settings (%APPDATA%\SectorGapAnalyzer\config.json)
   main.py          Entry point (`python -m gui.main`, and the PyInstaller build target)
 
@@ -351,7 +413,7 @@ icon.ico / icon.png       App icon (.ico is what's actually embedded in the buil
 requirements.txt          Runtime dependencies
 requirements-dev.txt      Adds build-time dependencies (PyInstaller) on top of requirements.txt
 
-data/sector_library/     Extracted per-sector SQLite DBs (gitignored: *.sqlite)
+data/sector_library/     Extracted per-sector SQLite DBs + summary reports (gitignored: *.sqlite, *.md)
 out/                     Generated candidate CSVs/Markdown reports (gitignored)
 docs/gap-finder.md       Original design document / methodology notes
 ```
@@ -378,26 +440,36 @@ scores (`density_score`, `bracket_score_norm`, `family_strength_score`, a
 weighted `priority_score`, spatial neighborhood anchoring, etc.). The scripts
 that actually exist today implement a simpler subset: bracketed-gap detection
 with a bracket-width cap, and backward/forward extrapolation gated by EDSM
-confirmation — no computed composite score, no spatial anchoring tier. Treat
-the doc as background on the *reasoning* behind the approach, not as a spec
-that matches the current code line-for-line.
+confirmation — no computed composite score, no scored spatial-anchoring tier
+(the doc's `density_score`-weighted neighborhood concept). `gap_spatial_export.py`'s
+"spatial search" is a different, later addition: an unscored radius filter on
+which systems count as "known" for the same bracketed-gap/backward logic, not
+the doc's confidence-weighted anchoring. Treat the doc as background on the
+*reasoning* behind the approach, not as a spec that matches the current code
+line-for-line.
 
 ## Output format reference
 
-`gap_full_export.py` and `gap_extrapolate_export.py` write CSVs with a shared
-schema so `aggregate_gap_master_list.py` can merge them:
+`gap_full_export.py`, `gap_extrapolate_export.py`, and `gap_spatial_export.py`
+write CSVs with a shared schema (see `scripts/gap_naming.py`) so
+`aggregate_gap_master_list.py` can merge them:
 
 | Column | Meaning |
 |---|---|
 | `system_name` | Candidate system name |
 | `edsm_status` | `not_in_edsm` (kept), `in_edsm` (filtered out), `skipped` (dry-run) |
-| `direction` | `bracketed_gap`, `backward`, or `forward` |
+| `direction` | `bracketed_gap` or `backward` (or `forward`, sector mode only) |
 | `steps_from_edge` | For backward/forward: distance from the known edge (1 = adjacent) |
 | `spansh_edge_number` | The known min (backward) or max (forward) the candidate extends from |
 | `family` | Sector + subsector token, e.g. `Outopps FG-Y` |
 | `subsector` | Just the subsector token, e.g. `FG-Y` |
-| `mass_prefix` | The mass-code letter+digit, e.g. `d1` |
-| `number` | The candidate's trailing number |
+| `mass_prefix` | The mass-code letter + boxel number, e.g. `d1` |
+| `mass_code` | Just the mass-code letter, e.g. `d` |
+| `boxel` | Just the boxel number, e.g. `1` |
+| `number` | The candidate's trailing serial number |
+
+`gap_spatial_export.py`'s CSVs add two more columns: `center_system` and
+`radius_ly`, recording the search that produced each row.
 
 **Sample output**: [`sample_master_gap_candidates.csv`](docs/samples/sample_master_gap_candidates.csv)
 / [`.md`](docs/samples/sample_master_gap_candidates.md) — real, EDSM-validated
@@ -412,9 +484,9 @@ Total candidates (not in EDSM): 47
 
 ## Summary
 
-| Sector | Bracketed Gap | Backward Extrap | Forward Extrap | Total |
-|--------|--------------:|-----------------:|----------------:|------:|
-| flaming_star_sector | 19 | 28 | 0 | 47 |
+| Sector | Bracketed Gap | Backward Extrap | Forward Extrap | Spatial Gap | Spatial Backward | Total |
+|--------|--------------:|-----------------:|----------------:|------------:|-----------------:|------:|
+| flaming_star_sector | 19 | 28 | 0 | 0 | 0 | 47 |
 
 ## flaming_star_sector
 
