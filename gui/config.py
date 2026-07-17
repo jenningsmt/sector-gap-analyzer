@@ -33,7 +33,11 @@ def _default_galaxy_dump_path() -> str:
 DEFAULT_CONFIG: dict[str, Any] = {
     "project_dir": _default_workspace_dir(),
     "galaxy_dump_path": _default_galaxy_dump_path(),
+    "mode": "gap",  # "gap" (sector-prefix, existing) or "spatial" (radius-around-a-system)
     "sectors": [],
+    "spatial_center_system": "",
+    "spatial_radius_ly": 20,
+    "spatial_sector_override": "",
     "max_bracket_width": 25,
     "extend_depth": 5,
     "run_forward": False,

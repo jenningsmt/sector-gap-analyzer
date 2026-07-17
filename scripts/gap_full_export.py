@@ -50,6 +50,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+try:
+    from scripts import gap_naming
+except ImportError:
+    import gap_naming
+
+_find_subsector_index = gap_naming.find_subsector_index
+_parse_sequence_name = gap_naming.parse_sequence_name
+
 
 # =============================================================================
 # Constants
@@ -73,79 +81,21 @@ class NoSequencedSystemsError(Exception):
 
 
 # =============================================================================
-# Name parsing (mirrors planner_strategic/candidates.py exactly)
+# Name parsing (see gap_naming.py — shared with gap_extrapolate_export.py and
+# gap_spatial_export.py)
 # =============================================================================
-
-def _find_subsector_index(tokens: list[str]) -> Optional[int]:
-    """Find the index of the subsector token (e.g. 'AA-Q') in a token list."""
-    for idx, token in enumerate(tokens):
-        if re.match(r"^[A-Z]{1,3}-[A-Z]$", token, re.IGNORECASE):
-            return idx
-    return None
-
-
-def _parse_sequence_name(name: str) -> Optional[tuple[str, str, int]]:
-    """
-    Parse a procedural system name into (family, prefix, number).
-
-    Example: "Heart Sector AA-Q b5-1"
-      → family = "Heart Sector AA-Q"
-        prefix = "b5-"
-        number = 1
-
-    Returns None if the name does not follow the sequenced pattern.
-    """
-    tokens = [t for t in name.split() if t]
-    if len(tokens) < 3:
-        return None
-
-    subsector_idx = _find_subsector_index(tokens)
-    if subsector_idx is None or subsector_idx == 0:
-        # Fallback: treat first two tokens as family
-        family = " ".join(tokens[:2])
-        last = tokens[-1]
-        m = re.match(r"^([a-z]\d+-)(\d+)$", last, re.IGNORECASE)
-        if not m:
-            return None
-        return family, m.group(1).lower(), int(m.group(2))
-
-    sector = " ".join(tokens[:subsector_idx])
-    subsector = tokens[subsector_idx]
-    last = tokens[-1]
-    m = re.match(r"^([a-z]\d+-)(\d+)$", last, re.IGNORECASE)
-    if not m:
-        return None
-    family = f"{sector} {subsector}"
-    return family, m.group(1).lower(), int(m.group(2))
-
-
-def _parse_sort_key(name: str) -> tuple:
-    """
-    Return a sort key that groups by (subsector, mass_prefix) and orders by number.
-
-    "Heart Sector AA-Q b5-3" → ("AA-Q", "b5-", 3)
-    Falls back to (name, "", 0) for non-sequence names.
-    """
-    parsed = _parse_sequence_name(name)
-    if parsed is None:
-        # For non-sequence names, extract subsector for grouping if present
-        tokens = [t for t in name.split() if t]
-        idx = _find_subsector_index(tokens)
-        subsector = tokens[idx] if idx is not None else ""
-        return (subsector, "", 0, name)
-    family, prefix, number = parsed
-    # Extract just the subsector token from family for grouping
-    tokens = [t for t in family.split() if t]
-    idx = _find_subsector_index(tokens)
-    subsector = tokens[idx] if idx is not None else ""
-    return (subsector, prefix, number, name)
+#
+# _find_subsector_index / _parse_sequence_name are aliased above from
+# gap_naming. Sorting/grouping uses gap_naming.group_sort_key directly (see
+# write_full_csv and run()) so the sector/subsector/mass-code/boxel/serial
+# grouping order stays identical across all three export scripts.
 
 
 # =============================================================================
 # Gap generation (mirrors planner_strategic/candidates.py)
 # =============================================================================
 
-def _build_sequences(names: list[str]) -> dict[tuple[str, str], list[int]]:
+def build_sequences(names: list[str]) -> dict[tuple[str, str], list[int]]:
     """Build a mapping of (family, prefix) → sorted list of known numbers."""
     sequences: dict[tuple[str, str], list[int]] = defaultdict(list)
     for name in names:
@@ -157,7 +107,12 @@ def _build_sequences(names: list[str]) -> dict[tuple[str, str], list[int]]:
     return {key: sorted(set(nums)) for key, nums in sequences.items()}
 
 
-def _generate_gaps(
+# Backward-compatible alias (kept private for anything still importing the
+# old name within this file).
+_build_sequences = build_sequences
+
+
+def generate_bracketed_gaps(
     sequences: dict[tuple[str, str], list[int]],
     max_bracket_width: Optional[int] = None,
 ) -> list[str]:
@@ -189,6 +144,9 @@ def _generate_gaps(
             for n in range(lower + 1, upper):
                 candidates.append(f"{family} {prefix}{n}")
     return candidates
+
+
+_generate_gaps = generate_bracketed_gaps
 
 
 # =============================================================================
@@ -396,15 +354,17 @@ def write_full_csv(out_path: Path, candidates: list[str], dry_run: bool) -> None
         writer = csv.writer(f)
         writer.writerow([
             "system_name", "edsm_status", "direction", "steps_from_edge",
-            "spansh_edge_number", "family", "subsector", "mass_prefix", "number",
+            "spansh_edge_number", "family", "subsector", "mass_prefix",
+            "mass_code", "boxel", "number",
         ])
-        for name, family, prefix, number in sorted(rows, key=lambda r: _parse_sort_key(r[0])):
+        for name, family, prefix, number in sorted(rows, key=lambda r: gap_naming.group_sort_key(r[0])):
             tokens = [t for t in name.split() if t]
             idx = _find_subsector_index(tokens)
             subsector = tokens[idx] if idx is not None else ""
+            mass_code, boxel = gap_naming.split_mass_prefix(prefix)
             writer.writerow([
                 name, edsm_status, "bracketed_gap", "", "",
-                family, subsector, prefix.rstrip("-"), number,
+                family, subsector, prefix.rstrip("-"), mass_code, boxel, number,
             ])
     print(f"  CSV:  {out_path}  ({len(rows)} rows)")
 
@@ -490,8 +450,8 @@ def run(
     print()
     print("Phase 4: Sorting and writing output...")
 
-    # Structural sort: (subsector, mass_prefix, number)
-    validated_sorted = sorted(validated, key=_parse_sort_key)
+    # Structural sort: (subsector, mass_code, boxel, number) -- in-game order
+    validated_sorted = sorted(validated, key=gap_naming.group_sort_key)
 
     # Build output filename
     sector_slug = re.sub(r"[^a-z0-9]+", "_", sector.lower()).strip("_")

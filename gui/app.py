@@ -45,9 +45,24 @@ class App:
     # Run tab
     # ------------------------------------------------------------------
     def _build_run_tab(self, parent: ttk.Frame) -> None:
-        # -- Sector list --
+        # -- Mode --
+        mode_frame = ttk.LabelFrame(parent, text="Mode")
+        mode_frame.pack(fill="x", padx=6, pady=6)
+        self.mode_frame = mode_frame
+        self.mode_var = tk.StringVar(value=self.config.get("mode", "gap"))
+        mode_row = ttk.Frame(mode_frame)
+        mode_row.pack(fill="x", padx=6, pady=4)
+        ttk.Radiobutton(
+            mode_row, text="Gap", variable=self.mode_var, value="gap", command=self._refresh_mode
+        ).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(
+            mode_row, text="Spatial", variable=self.mode_var, value="spatial", command=self._refresh_mode
+        ).pack(side="left")
+
+        # -- Sector list (Gap mode) --
         sector_frame = ttk.LabelFrame(parent, text="Sectors")
         sector_frame.pack(fill="x", padx=6, pady=6)
+        self.sector_frame = sector_frame
 
         list_row = ttk.Frame(sector_frame)
         list_row.pack(fill="x", padx=6, pady=6)
@@ -71,6 +86,36 @@ class App:
         self.sector_entry.bind("<Return>", lambda _event: self._add_sector())
         ttk.Button(entry_row, text="Add", command=self._add_sector).pack(side="left", padx=(6, 0))
 
+        # -- Spatial search (Spatial mode) --
+        spatial_frame = ttk.LabelFrame(parent, text="Spatial Search")
+        self.spatial_frame = spatial_frame
+
+        self.spatial_center_var = tk.StringVar(value=self.config.get("spatial_center_system", ""))
+        self.spatial_radius_var = tk.StringVar(value=str(self.config.get("spatial_radius_ly", 20)))
+        self.spatial_sector_override_var = tk.StringVar(value=self.config.get("spatial_sector_override", ""))
+
+        spatial_grid = ttk.Frame(spatial_frame)
+        spatial_grid.pack(fill="x", padx=6, pady=6)
+        ttk.Label(spatial_grid, text="Center system:").grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Entry(spatial_grid, textvariable=self.spatial_center_var, width=40).grid(
+            row=0, column=1, sticky="we", pady=2
+        )
+        ttk.Label(spatial_grid, text="Radius (ly):").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(spatial_grid, textvariable=self.spatial_radius_var, width=10).grid(
+            row=1, column=1, sticky="w", pady=2
+        )
+        ttk.Label(spatial_grid, text="Sector override (optional):").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(spatial_grid, textvariable=self.spatial_sector_override_var, width=40).grid(
+            row=2, column=1, sticky="we", pady=2
+        )
+        ttk.Label(
+            spatial_frame,
+            text="Sector is auto-detected from the center system name if left blank. "
+                 "That sector must already be extracted (use Gap mode first).",
+            wraplength=560, justify="left", foreground="#666666",
+        ).pack(anchor="w", padx=6, pady=(0, 6))
+        spatial_grid.columnconfigure(1, weight=1)
+
         # -- Stages --
         stages_frame = ttk.LabelFrame(parent, text="Stages")
         stages_frame.pack(fill="x", padx=6, pady=6)
@@ -90,10 +135,11 @@ class App:
             "forward_extrap": "Forward extrapolation (advanced)",
             "aggregate": "Aggregate master candidate list",
         }
+        self.stage_checkbuttons: dict[str, ttk.Checkbutton] = {}
         for key in ("extract", "bracketed_gaps", "backward_extrap", "forward_extrap", "aggregate"):
-            ttk.Checkbutton(stages_frame, text=labels[key], variable=self.stage_vars[key]).pack(
-                anchor="w", padx=6
-            )
+            cb = ttk.Checkbutton(stages_frame, text=labels[key], variable=self.stage_vars[key])
+            cb.pack(anchor="w", padx=6)
+            self.stage_checkbuttons[key] = cb
 
         # -- Parameters --
         params_frame = ttk.LabelFrame(parent, text="Parameters")
@@ -135,6 +181,23 @@ class App:
         self.log_text.configure(yscrollcommand=log_scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         log_scroll.pack(side="right", fill="y")
+
+        self._refresh_mode()
+
+    def _refresh_mode(self) -> None:
+        mode = self.mode_var.get()
+        if mode == "spatial":
+            self.sector_frame.pack_forget()
+            if not self.spatial_frame.winfo_ismapped():
+                self.spatial_frame.pack(fill="x", padx=6, pady=6, after=self.mode_frame)
+            for key in ("extract", "forward_extrap"):
+                self.stage_checkbuttons[key].configure(state="disabled")
+        else:  # gap
+            self.spatial_frame.pack_forget()
+            if not self.sector_frame.winfo_ismapped():
+                self.sector_frame.pack(fill="x", padx=6, pady=6, after=self.mode_frame)
+            for key in ("extract", "forward_extrap"):
+                self.stage_checkbuttons[key].configure(state="normal")
 
     def _add_sector(self) -> None:
         value = self.sector_entry.get().strip()
@@ -205,7 +268,11 @@ class App:
 
         self.config["project_dir"] = self.project_dir_var.get().strip()
         self.config["galaxy_dump_path"] = self.galaxy_dump_var.get().strip()
+        self.config["mode"] = self.mode_var.get()
         self.config["sectors"] = list(self.sector_listbox.get(0, "end"))
+        self.config["spatial_center_system"] = self.spatial_center_var.get().strip()
+        self.config["spatial_radius_ly"] = _int_or(self.spatial_radius_var.get(), 20)
+        self.config["spatial_sector_override"] = self.spatial_sector_override_var.get().strip()
         self.config["max_bracket_width"] = _int_or(self.max_bracket_width_var.get(), 25)
         self.config["extend_depth"] = _int_or(self.extend_depth_var.get(), 5)
         self.config["max_forward_step"] = _int_or(self.max_forward_step_var.get(), 5)
@@ -217,9 +284,7 @@ class App:
         if self.worker.is_running():
             return
         cfg = self._collect_config()
-        if not cfg["sectors"]:
-            messagebox.showwarning("No sectors", "Add at least one sector before running.")
-            return
+        mode = cfg.get("mode", "gap")
 
         project_dir = cfg["project_dir"].strip()
         if not project_dir:
@@ -228,21 +293,35 @@ class App:
             return
         Path(project_dir).mkdir(parents=True, exist_ok=True)
 
-        galaxy_dump_path = cfg["galaxy_dump_path"].strip()
-        if not galaxy_dump_path or not Path(galaxy_dump_path).exists():
-            messagebox.showerror(
-                "Galaxy dump not found",
-                "No galaxy dump file found at:\n\n"
-                f"{galaxy_dump_path or '(not set)'}\n\n"
-                "Download the full Spansh galaxy dump (galaxy.json.gz) and save it there, "
-                "or use Browse in the Settings tab to point at your own copy.",
-            )
-            self.notebook.select(self.settings_tab)
-            return
+        if mode == "spatial":
+            if not cfg["spatial_center_system"]:
+                messagebox.showwarning("Center system required", "Enter a center system before running.")
+                return
+            if cfg["spatial_radius_ly"] <= 0:
+                messagebox.showwarning("Invalid radius", "Radius (ly) must be greater than 0.")
+                return
+            run_label = f"spatial search around {cfg['spatial_center_system']!r} ({cfg['spatial_radius_ly']} ly)"
+        else:
+            if not cfg["sectors"]:
+                messagebox.showwarning("No sectors", "Add at least one sector before running.")
+                return
+
+            galaxy_dump_path = cfg["galaxy_dump_path"].strip()
+            if not galaxy_dump_path or not Path(galaxy_dump_path).exists():
+                messagebox.showerror(
+                    "Galaxy dump not found",
+                    "No galaxy dump file found at:\n\n"
+                    f"{galaxy_dump_path or '(not set)'}\n\n"
+                    "Download the full Spansh galaxy dump (galaxy.json.gz) and save it there, "
+                    "or use Browse in the Settings tab to point at your own copy.",
+                )
+                self.notebook.select(self.settings_tab)
+                return
+            run_label = ', '.join(cfg['sectors'])
 
         config_module.save_config(cfg)
 
-        self._append_log(f"--- Starting run: {', '.join(cfg['sectors'])} ---")
+        self._append_log(f"--- Starting run: {run_label} ---")
         started = self.worker.start(pipeline.run_pipeline, cfg)
         if not started:
             return

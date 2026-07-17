@@ -66,6 +66,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+try:
+    from scripts import gap_naming
+except ImportError:
+    import gap_naming
+
 
 # =============================================================================
 # Constants
@@ -91,42 +96,13 @@ class NoSequencedSystemsError(Exception):
 
 
 # =============================================================================
-# Name parsing  (mirrors gap_full_export.py exactly)
+# Name parsing (see gap_naming.py — shared with gap_full_export.py and
+# gap_spatial_export.py)
 # =============================================================================
 
-def _find_subsector_index(tokens: list[str]) -> Optional[int]:
-    for idx, token in enumerate(tokens):
-        if re.match(r"^[A-Z]{1,3}-[A-Z]$", token, re.IGNORECASE):
-            return idx
-    return None
-
-
-def _parse_sequence_name(name: str) -> Optional[tuple[str, str, int]]:
-    """Return (family, prefix, number) or None for non-procedural names."""
-    tokens = [t for t in name.split() if t]
-    if len(tokens) < 3:
-        return None
-    subsector_idx = _find_subsector_index(tokens)
-    if subsector_idx is None or subsector_idx == 0:
-        family = " ".join(tokens[:2])
-        last = tokens[-1]
-        m = re.match(r"^([a-z]\d+-)(\d+)$", last, re.IGNORECASE)
-        if not m:
-            return None
-        return family, m.group(1).lower(), int(m.group(2))
-    sector = " ".join(tokens[:subsector_idx])
-    subsector = tokens[subsector_idx]
-    last = tokens[-1]
-    m = re.match(r"^([a-z]\d+-)(\d+)$", last, re.IGNORECASE)
-    if not m:
-        return None
-    return f"{sector} {subsector}", m.group(1).lower(), int(m.group(2))
-
-
-def _extract_subsector(family: str) -> str:
-    tokens = [t for t in family.split() if t]
-    idx = _find_subsector_index(tokens)
-    return tokens[idx] if idx is not None else ""
+_find_subsector_index = gap_naming.find_subsector_index
+_parse_sequence_name = gap_naming.parse_sequence_name
+_extract_subsector = gap_naming.extract_subsector
 
 
 # =============================================================================
@@ -136,6 +112,7 @@ def _extract_subsector(family: str) -> str:
 class ExtrapCandidate:
     __slots__ = (
         "system_name", "family", "subsector", "prefix", "number",
+        "mass_code", "boxel",
         "direction", "steps_from_edge", "edge_number", "edsm_status",
     )
 
@@ -155,6 +132,7 @@ class ExtrapCandidate:
         self.subsector = subsector
         self.prefix = prefix
         self.number = number
+        self.mass_code, self.boxel = gap_naming.split_mass_prefix(prefix)
         self.direction = direction
         self.steps_from_edge = steps_from_edge
         self.edge_number = edge_number
@@ -430,20 +408,26 @@ def validate_phase(
 # =============================================================================
 
 def write_phase_csv(out_path: Path, candidates: list[ExtrapCandidate]) -> None:
+    # edsm_status stays the outermost bucket (it's a different result category,
+    # not part of the in-game grouping); within a bucket, order in-game:
+    # subsector -> mass code -> boxel -> serial, steps_from_edge as a
+    # tiebreaker only.
     ordered = sorted(
         candidates,
-        key=lambda c: (c.edsm_status, c.subsector, c.prefix, c.steps_from_edge, c.number),
+        key=lambda c: (c.edsm_status, c.subsector, c.mass_code, c.boxel, c.number, c.steps_from_edge),
     )
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "system_name", "edsm_status", "direction", "steps_from_edge",
-            "spansh_edge_number", "family", "subsector", "mass_prefix", "number",
+            "spansh_edge_number", "family", "subsector", "mass_prefix",
+            "mass_code", "boxel", "number",
         ])
         for c in ordered:
             writer.writerow([
                 c.system_name, c.edsm_status, c.direction, c.steps_from_edge,
-                c.edge_number, c.family, c.subsector, c.prefix.rstrip("-"), c.number,
+                c.edge_number, c.family, c.subsector, c.prefix.rstrip("-"),
+                c.mass_code, c.boxel, c.number,
             ])
     print(f"  CSV:  {out_path}  ({len(candidates)} rows)")
 
@@ -514,7 +498,7 @@ def _write_md_group(f, title: str, candidates: list[ExtrapCandidate]) -> None:
     if not candidates:
         return
     f.write(f"## {title}\n\n")
-    ordered = sorted(candidates, key=lambda c: (c.subsector, c.prefix, c.steps_from_edge, c.number))
+    ordered = sorted(candidates, key=lambda c: (c.subsector, c.mass_code, c.boxel, c.number, c.steps_from_edge))
     current_key: Optional[tuple] = None
     buf: list[ExtrapCandidate] = []
 
