@@ -15,6 +15,11 @@ from typing import Any
 
 APP_NAME = "SectorGapAnalyzer"
 
+# Displayed in the window title. Keep in sync with installer.iss's
+# MyAppVersion and version_info.txt's filevers/prodvers/FileVersion/
+# ProductVersion when cutting a new release.
+APP_VERSION = "1.1.0"
+
 
 def _default_workspace_dir() -> str:
     """Per-user writable workspace, independent of wherever the app itself is

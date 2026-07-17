@@ -21,7 +21,7 @@ SHUTDOWN_TIMEOUT_MS = 20000
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Sector Gap Analyzer")
+        self.root.title(f"Sector Gap Analyzer {config_module.APP_VERSION}")
         self.root.geometry("900x700")
 
         self.worker = Worker()

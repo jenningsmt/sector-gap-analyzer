@@ -8,6 +8,8 @@
 ; The resulting installer is written to dist-installer\ and is meant to be
 ; attached to a GitHub Release, not committed to the repo.
 
+; Bump this together with version_info.txt's filevers/prodvers/FileVersion/
+; ProductVersion and gui/config.py's APP_VERSION when cutting a new release.
 #define MyAppName "Sector Gap Analyzer"
 #define MyAppVersion "1.1.0"
 #define MyAppExeName "SectorGapAnalyzer.exe"

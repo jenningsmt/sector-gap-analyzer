@@ -3,7 +3,7 @@
 # Windows version-info resource for the PyInstaller build. Referenced by
 # SectorGapAnalyzer.spec's EXE(version='version_info.txt'). Bump filevers/
 # prodvers/FileVersion/ProductVersion together with installer.iss's
-# MyAppVersion when cutting a new release.
+# MyAppVersion and gui/config.py's APP_VERSION when cutting a new release.
 VSVersionInfo(
   ffi=FixedFileInfo(
     filevers=(1, 1, 0, 0),
