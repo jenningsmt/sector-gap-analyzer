@@ -11,7 +11,7 @@
 ; Bump this together with version_info.txt's filevers/prodvers/FileVersion/
 ; ProductVersion and gui/config.py's APP_VERSION when cutting a new release.
 #define MyAppName "Sector Gap Analyzer"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppExeName "SectorGapAnalyzer.exe"
 
 [Setup]
