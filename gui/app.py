@@ -127,6 +127,7 @@ class App:
             "backward_extrap": tk.BooleanVar(value=stages.get("backward_extrap", True)),
             "forward_extrap": tk.BooleanVar(value=stages.get("forward_extrap", False)),
             "aggregate": tk.BooleanVar(value=stages.get("aggregate", True)),
+            "bio_opportunity": tk.BooleanVar(value=stages.get("bio_opportunity", False)),
         }
         labels = {
             "extract": "Extract sectors from galaxy dump",
@@ -134,9 +135,13 @@ class App:
             "backward_extrap": "Backward extrapolation",
             "forward_extrap": "Forward extrapolation (advanced)",
             "aggregate": "Aggregate master candidate list",
+            "bio_opportunity": "Stale exobiology candidates (pre-Odyssey, unrevisited)",
         }
         self.stage_checkbuttons: dict[str, ttk.Checkbutton] = {}
-        for key in ("extract", "bracketed_gaps", "backward_extrap", "forward_extrap", "aggregate"):
+        for key in (
+            "extract", "bracketed_gaps", "backward_extrap", "forward_extrap",
+            "aggregate", "bio_opportunity",
+        ):
             cb = ttk.Checkbutton(stages_frame, text=labels[key], variable=self.stage_vars[key])
             cb.pack(anchor="w", padx=6)
             self.stage_checkbuttons[key] = cb
@@ -190,13 +195,13 @@ class App:
             self.sector_frame.pack_forget()
             if not self.spatial_frame.winfo_ismapped():
                 self.spatial_frame.pack(fill="x", padx=6, pady=6, after=self.mode_frame)
-            for key in ("extract", "forward_extrap"):
+            for key in ("extract", "forward_extrap", "bio_opportunity"):
                 self.stage_checkbuttons[key].configure(state="disabled")
         else:  # gap
             self.spatial_frame.pack_forget()
             if not self.sector_frame.winfo_ismapped():
                 self.sector_frame.pack(fill="x", padx=6, pady=6, after=self.mode_frame)
-            for key in ("extract", "forward_extrap"):
+            for key in ("extract", "forward_extrap", "bio_opportunity"):
                 self.stage_checkbuttons[key].configure(state="normal")
 
     def _add_sector(self) -> None:
@@ -361,7 +366,21 @@ class App:
                     self._append_log(line)
         except queue.Empty:
             pass
+
+        try:
+            while True:
+                request = self.worker.confirm_queue.get_nowait()
+                self._handle_confirmation_request(request)
+        except queue.Empty:
+            pass
+
         self.root.after(POLL_INTERVAL_MS, self._poll_log_queue)
+
+    def _handle_confirmation_request(self, request: dict) -> None:
+        req_id = request["id"]
+        message = request.get("message", "Continue?")
+        proceed = messagebox.askyesno("Large run -- confirm before continuing", message)
+        self.worker.answer_confirmation(req_id, proceed)
 
     def _on_close(self) -> None:
         if not self.worker.is_running():

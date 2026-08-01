@@ -9,12 +9,14 @@ cooperative-cancellation checks between stages.
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from scripts import (
     aggregate_gap_master_list,
+    bio_opportunity_export,
     extract_multi_sector_to_sqlite,
     gap_extrapolate_export,
     gap_full_export,
@@ -24,6 +26,13 @@ from scripts import (
 )
 from scripts.extract_sector_systems_to_sqlite import sanitize_prefix
 
+# EDSM validation is throttled to 1 request/second (see scripts/gap_full_export.py
+# and gap_extrapolate_export.py), so estimated candidate count == estimated seconds.
+# This is a worst case that ignores existing EDSM-result cache hits, which is
+# deliberate: it's only used to decide whether to show the confirmation prompt,
+# and actual runs are often faster than this once a sector has been run before.
+LARGE_RUN_WARN_SECONDS = 3600
+
 
 def sector_db_path(project_dir: Path, sector: str) -> Path:
     return project_dir / "data" / "sector_library" / f"sector_{sanitize_prefix(sector)}.sqlite"
@@ -31,6 +40,136 @@ def sector_db_path(project_dir: Path, sector: str) -> Path:
 
 def _cancelled(cancel_event: Optional[threading.Event]) -> bool:
     return cancel_event is not None and cancel_event.is_set()
+
+
+def _load_sector_system_names(db_path: Path, sector: str) -> list[str]:
+    like = sector.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " %"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            "SELECT name FROM systems WHERE LOWER(name) LIKE LOWER(?) ESCAPE '\\'",
+            (like,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
+
+
+def _estimate_candidates_from_names(
+    names: list[str],
+    stages: dict[str, bool],
+    config: dict[str, Any],
+    *,
+    include_forward: bool = True,
+) -> dict[str, int]:
+    """Local-only (no network) candidate counts for each enabled EDSM-bound
+    stage, computed with the exact same functions those stages use to
+    generate candidates -- so these numbers match what would actually run."""
+    known = set(names)
+    per_stage: dict[str, int] = {}
+
+    if stages.get("bracketed_gaps", True):
+        sequences = gap_full_export.build_sequences(names)
+        raw = gap_full_export.generate_bracketed_gaps(
+            sequences, max_bracket_width=config.get("max_bracket_width", 25)
+        )
+        per_stage["Bracketed gaps"] = len(set(raw) - known)
+
+    if stages.get("backward_extrap", True):
+        bwd = gap_extrapolate_export.build_backward_candidates(
+            names, config.get("extend_depth", 5)
+        )
+        per_stage["Backward extrapolation"] = len(bwd)
+
+    if include_forward and stages.get("forward_extrap", False):
+        fwd = gap_extrapolate_export.build_forward_step1_candidates(names)
+        per_stage["Forward extrapolation (step 1 only; chain steps not estimated)"] = len(fwd)
+
+    return per_stage
+
+
+def _estimate_edsm_stage_candidates(
+    db_path: Path, sector: str, stages: dict[str, bool], config: dict[str, Any]
+) -> dict[str, Any]:
+    names = _load_sector_system_names(db_path, sector)
+    per_stage = _estimate_candidates_from_names(names, stages, config)
+    total = sum(per_stage.values())
+    return {
+        "sector": sector,
+        "known_systems": len(names),
+        "per_stage": per_stage,
+        "total_candidates": total,
+        "worst_case_seconds": total,  # 1 req/s
+    }
+
+
+def _estimate_spatial_candidates(
+    db_path: Path, center_system: str, radius_ly: float, stages: dict[str, bool], config: dict[str, Any]
+) -> dict[str, Any]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        resolved_name, cx, cy, cz = gap_spatial_export.resolve_center(conn, center_system)
+        names = gap_spatial_export.load_neighborhood(conn, cx, cy, cz, radius_ly)
+    finally:
+        conn.close()
+    per_stage = _estimate_candidates_from_names(names, stages, config, include_forward=False)
+    total = sum(per_stage.values())
+    return {
+        "sector": f"{resolved_name} (within {radius_ly} ly)",
+        "known_systems": len(names),
+        "per_stage": per_stage,
+        "total_candidates": total,
+        "worst_case_seconds": total,
+    }
+
+
+def _format_large_run_message(estimate: dict[str, Any]) -> str:
+    lines = [
+        f"{estimate['sector']!r} looks large: {estimate['known_systems']:,} known systems.",
+        "",
+    ]
+    for label, count in estimate["per_stage"].items():
+        hours = count / 3600
+        lines.append(f"  {label}: {count:,} candidates (~{hours:.1f}h worst case)")
+    total = estimate["total_candidates"]
+    total_hours = estimate["worst_case_seconds"] / 3600
+    lines.append("")
+    lines.append(
+        f"Total: {total:,} candidates, ~{total_hours:.1f}h worst case "
+        "at EDSM's 1 request/second limit."
+    )
+    lines.append("")
+    lines.append(
+        "Actual time may be shorter if some candidates are already cached "
+        "from a previous run (EDSM results cache for 7 days)."
+    )
+    lines.append("")
+    lines.append("Continue with EDSM-validated stages for this sector?")
+    return "\n".join(lines)
+
+
+def _confirm_large_run(
+    confirm_cb: Optional[Callable[[dict], bool]],
+    cancel_event: Optional[threading.Event],
+    estimate: dict[str, Any],
+) -> bool:
+    """Returns True to proceed. If the estimate is below the warning
+    threshold, or there's no confirm_cb wired up (e.g. CLI usage), proceeds
+    without prompting."""
+    if estimate["worst_case_seconds"] < LARGE_RUN_WARN_SECONDS:
+        return True
+    if confirm_cb is None:
+        return True
+    message = _format_large_run_message(estimate)
+    print(f"\n  {message}\n")
+    proceed = confirm_cb({"message": message, **estimate})
+    if not proceed:
+        print(
+            f"  Skipping EDSM-validated stages for {estimate['sector']!r} by user choice "
+            f"({estimate['total_candidates']:,} candidates, "
+            f"~{estimate['worst_case_seconds'] / 3600:.1f}h worst case)."
+        )
+    return proceed
 
 
 def _detect_sector_from_system(system_name: str) -> str:
@@ -44,17 +183,33 @@ def _detect_sector_from_system(system_name: str) -> str:
     return " ".join(tokens[:idx])
 
 
-def run_pipeline(config: dict[str, Any], cancel_event: Optional[threading.Event] = None) -> int:
+def run_pipeline(
+    config: dict[str, Any],
+    cancel_event: Optional[threading.Event] = None,
+    confirm_cb: Optional[Callable[[dict], bool]] = None,
+) -> int:
     """Dispatch to the sector-prefix ("gap") or radius-around-a-system
     ("spatial") pipeline based on config["mode"]. Returns 0 on normal
-    completion, 130 if cancelled partway through, 1 on a config/setup error."""
+    completion, 130 if cancelled partway through, 1 on a config/setup error.
+
+    confirm_cb, if given, is called with a payload dict (see
+    _format_large_run_message) whenever a sector's estimated EDSM-validated
+    candidate volume exceeds LARGE_RUN_WARN_SECONDS, and must return True to
+    proceed or False to skip that sector's EDSM-bound stages. It's expected
+    to block the calling thread until answered (see gui/worker.py) -- when
+    None (e.g. running scripts directly, not through the GUI), large runs
+    proceed without prompting."""
     mode = config.get("mode", "gap")
     if mode == "spatial":
-        return _run_spatial_pipeline(config, cancel_event)
-    return _run_gap_pipeline(config, cancel_event)
+        return _run_spatial_pipeline(config, cancel_event, confirm_cb)
+    return _run_gap_pipeline(config, cancel_event, confirm_cb)
 
 
-def _run_gap_pipeline(config: dict[str, Any], cancel_event: Optional[threading.Event] = None) -> int:
+def _run_gap_pipeline(
+    config: dict[str, Any],
+    cancel_event: Optional[threading.Event] = None,
+    confirm_cb: Optional[Callable[[dict], bool]] = None,
+) -> int:
     """Run the configured stages for config["sectors"]. Returns 0 on normal
     completion, 130 if cancelled partway through."""
     project_dir = Path(config["project_dir"])
@@ -134,7 +289,23 @@ def _run_gap_pipeline(config: dict[str, Any], cancel_event: Optional[threading.E
 
         print(f">>> Sector: {sector}")
 
-        if stages.get("bracketed_gaps", True):
+        skip_edsm_stages = False
+        edsm_stages_enabled = (
+            stages.get("bracketed_gaps", True)
+            or stages.get("backward_extrap", True)
+            or stages.get("forward_extrap", False)
+        )
+        if edsm_stages_enabled and not dry_run:
+            try:
+                estimate = _estimate_edsm_stage_candidates(db_path, sector, stages, config)
+                skip_edsm_stages = not _confirm_large_run(confirm_cb, cancel_event, estimate)
+            except Exception as exc:
+                print(f"  (could not estimate run time for {sector!r}: {exc})")
+            if _cancelled(cancel_event):
+                print("Cancelled; skipping remaining sectors.")
+                return 130
+
+        if stages.get("bracketed_gaps", True) and not skip_edsm_stages:
             print(f"  -- Bracketed gaps ({sector}) --")
             try:
                 gap_full_export.run(
@@ -151,8 +322,8 @@ def _run_gap_pipeline(config: dict[str, Any], cancel_event: Optional[threading.E
             if _cancelled(cancel_event):
                 return 130
 
-        run_backward = stages.get("backward_extrap", True)
-        run_forward = stages.get("forward_extrap", False)
+        run_backward = stages.get("backward_extrap", True) and not skip_edsm_stages
+        run_forward = stages.get("forward_extrap", False) and not skip_edsm_stages
         if run_backward or run_forward:
             direction = "both" if (run_backward and run_forward) else (
                 "forward" if run_forward else "backward"
@@ -172,6 +343,15 @@ def _run_gap_pipeline(config: dict[str, Any], cancel_event: Optional[threading.E
                 )
             except Exception as exc:
                 print(f"  SKIP extrapolation for {sector!r}: {exc}")
+            if _cancelled(cancel_event):
+                return 130
+
+        if stages.get("bio_opportunity", False):
+            print(f"  -- Stale exobiology candidates ({sector}) --")
+            try:
+                bio_opportunity_export.run(db_path=db_path, sector=sector, out_dir=out_dir)
+            except Exception as exc:
+                print(f"  SKIP bio opportunity export for {sector!r}: {exc}")
             if _cancelled(cancel_event):
                 return 130
 
@@ -206,7 +386,11 @@ def _run_aggregation(out_dir: Path) -> None:
     aggregate_gap_master_list.write_master_md(md_path, rows)
 
 
-def _run_spatial_pipeline(config: dict[str, Any], cancel_event: Optional[threading.Event] = None) -> int:
+def _run_spatial_pipeline(
+    config: dict[str, Any],
+    cancel_event: Optional[threading.Event] = None,
+    confirm_cb: Optional[Callable[[dict], bool]] = None,
+) -> int:
     """Run a radius-around-a-system gap search. Unlike the sector pipeline,
     this never triggers galaxy-dump extraction -- it requires the sector
     containing the center system to have already been extracted."""
@@ -257,6 +441,20 @@ def _run_spatial_pipeline(config: dict[str, Any], cancel_event: Optional[threadi
     print(f"  Dry run       : {dry_run}")
     print()
 
+    run_bracketed = stages.get("bracketed_gaps", True)
+    run_backward = stages.get("backward_extrap", True)
+    if (run_bracketed or run_backward) and not dry_run:
+        try:
+            estimate = _estimate_spatial_candidates(db_path, center_system, radius_ly, stages, config)
+            if not _confirm_large_run(confirm_cb, cancel_event, estimate):
+                run_bracketed = False
+                run_backward = False
+        except Exception as exc:
+            print(f"  (could not estimate run time: {exc})")
+        if _cancelled(cancel_event):
+            print("Cancelled.")
+            return 130
+
     try:
         gap_spatial_export.run(
             db_path=db_path,
@@ -268,8 +466,8 @@ def _run_spatial_pipeline(config: dict[str, Any], cancel_event: Optional[threadi
             cache_db_path=None,
             max_bracket_width=config.get("max_bracket_width", 25),
             extend_depth=config.get("extend_depth", 5),
-            run_bracketed=stages.get("bracketed_gaps", True),
-            run_backward=stages.get("backward_extrap", True),
+            run_bracketed=run_bracketed,
+            run_backward=run_backward,
             cancel_event=cancel_event,
         )
     except Exception as exc:

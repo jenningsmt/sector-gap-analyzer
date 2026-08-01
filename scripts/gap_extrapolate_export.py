@@ -348,11 +348,15 @@ def validate_phase(
     api_errors = 0
     in_edsm_count = 0
     check_failed: list[str] = []
+    processed_count = total
+    cancelled = False
 
     try:
         for i, cand in enumerate(candidates, 1):
             if cancel_event is not None and cancel_event.is_set():
                 print(f"  Cancelled by user at {i}/{total}.", flush=True)
+                cancelled = True
+                processed_count = i - 1
                 break
             cached = _cached_exists(conn, cand.system_name, EDSM_CACHE_MAX_AGE_DAYS)
             if cached is not None:
@@ -391,6 +395,14 @@ def validate_phase(
     finally:
         conn.close()
 
+    if cancelled:
+        # Candidates past the cancellation point were never checked -- drop
+        # them in place so a cancelled run doesn't silently write unvalidated
+        # "pending" rows into a file named *_validated.csv/.md. Every caller
+        # uses this same list object afterward (counts, output, chain logic),
+        # so truncating it here is sufficient; no call site changes needed.
+        del candidates[processed_count:]
+
     if check_failed:
         print(
             f"\n  WARNING: {len(check_failed)} candidate(s) could not be checked "
@@ -400,7 +412,15 @@ def validate_phase(
         )
 
     elapsed = time.time() - start
-    print(f"\n  Done: {in_edsm_count} in EDSM, {total - in_edsm_count} not in EDSM, {elapsed:.0f}s")
+    not_in_edsm_count = processed_count - in_edsm_count - len(check_failed)
+    if cancelled:
+        print(
+            f"\n  Cancelled: {processed_count}/{total} checked before stopping -- "
+            f"{in_edsm_count} in EDSM, {not_in_edsm_count} not in EDSM, "
+            f"{len(check_failed)} check failed, {elapsed:.0f}s"
+        )
+    else:
+        print(f"\n  Done: {in_edsm_count} in EDSM, {not_in_edsm_count} not in EDSM, {elapsed:.0f}s")
 
 
 # =============================================================================

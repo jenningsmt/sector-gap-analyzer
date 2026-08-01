@@ -9,6 +9,7 @@ import contextlib
 import queue
 import threading
 import traceback
+import uuid
 from typing import Any, Callable, Optional
 
 DONE_SENTINEL = "__job_done__"
@@ -44,12 +45,17 @@ class Worker:
         worker = Worker()
         worker.start(some_fn, arg1, arg2, kwarg=value)
         # poll worker.log_queue on the Tk main loop via root.after(...)
+        # poll worker.confirm_queue the same way for pending confirmation
+        # requests (see request_confirmation/answer_confirmation below)
         # worker.cancel() to request cooperative cancellation
     """
 
     def __init__(self) -> None:
         self.log_queue: "queue.Queue[str]" = queue.Queue()
+        self.confirm_queue: "queue.Queue[dict]" = queue.Queue()
         self.cancel_event = threading.Event()
+        self._confirm_events: dict[str, threading.Event] = {}
+        self._confirm_answers: dict[str, bool] = {}
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -64,6 +70,8 @@ class Worker:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self.cancel_event = threading.Event()
+            self._confirm_events.clear()
+            self._confirm_answers.clear()
             self._thread = threading.Thread(
                 target=self._run, args=(fn, args, kwargs), daemon=True
             )
@@ -72,6 +80,34 @@ class Worker:
 
     def cancel(self) -> None:
         self.cancel_event.set()
+        # Unblock anything currently waiting on a confirmation dialog so
+        # cancel always takes effect immediately, even mid-prompt.
+        for event in list(self._confirm_events.values()):
+            event.set()
+
+    def request_confirmation(self, payload: dict) -> bool:
+        """Called from the WORKER thread (e.g. from within pipeline code) to
+        pause and ask the user a yes/no question before continuing -- e.g.
+        "this sector looks huge, proceed anyway?". Blocks the worker thread
+        (never the GUI) until the main thread calls answer_confirmation()
+        for this same request, or the job is cancelled. Returns True to
+        proceed, False to decline/abort."""
+        req_id = str(uuid.uuid4())
+        event = threading.Event()
+        self._confirm_events[req_id] = event
+        self.confirm_queue.put({"id": req_id, **payload})
+        event.wait()
+        answer = self._confirm_answers.pop(req_id, False)
+        self._confirm_events.pop(req_id, None)
+        return answer and not self.cancel_event.is_set()
+
+    def answer_confirmation(self, req_id: str, proceed: bool) -> None:
+        """Called from the GUI (main) thread once the user has responded to
+        a confirmation request drained from confirm_queue."""
+        self._confirm_answers[req_id] = proceed
+        event = self._confirm_events.get(req_id)
+        if event is not None:
+            event.set()
 
     def _run(self, fn: Callable[..., Any], args: tuple, kwargs: dict) -> None:
         writer = _QueueWriter(self.log_queue)
@@ -79,7 +115,12 @@ class Worker:
         error: Optional[str] = None
         try:
             with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
-                returncode = fn(*args, cancel_event=self.cancel_event, **kwargs)
+                returncode = fn(
+                    *args,
+                    cancel_event=self.cancel_event,
+                    confirm_cb=self.request_confirmation,
+                    **kwargs,
+                )
         except SystemExit as exc:
             returncode = exc.code
         except Exception:

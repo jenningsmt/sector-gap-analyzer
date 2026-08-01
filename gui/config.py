@@ -54,6 +54,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "backward_extrap": True,
         "forward_extrap": False,
         "aggregate": True,
+        "bio_opportunity": False,
     },
 }
 
