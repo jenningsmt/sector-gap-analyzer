@@ -1,4 +1,4 @@
-"""Tkinter control UI for the Sector Gap Analyzer pipeline."""
+"""Tkinter control UI for the Sector Surveyor pipeline."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ SHUTDOWN_TIMEOUT_MS = 20000
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"Sector Gap Analyzer {config_module.APP_VERSION}")
+        self.root.title(f"Sector Surveyor {config_module.APP_VERSION}")
         self.root.geometry("900x700")
 
         self.worker = Worker()

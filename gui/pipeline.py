@@ -225,7 +225,7 @@ def _run_gap_pipeline(
         print("No sectors selected. Nothing to do.")
         return 1
 
-    print(f"=== Sector Gap Analyzer pipeline: {len(sectors)} sector(s) ===")
+    print(f"=== Sector Surveyor pipeline: {len(sectors)} sector(s) ===")
     print(f"  Project dir : {project_dir}")
     print(f"  Galaxy dump : {galaxy_dump_path}")
     print(f"  Sectors     : {', '.join(sectors)}")
@@ -433,7 +433,7 @@ def _run_spatial_pipeline(
         )
         return 1
 
-    print("=== Sector Gap Analyzer pipeline: spatial search ===")
+    print("=== Sector Surveyor pipeline: spatial search ===")
     print(f"  Project dir   : {project_dir}")
     print(f"  Sector        : {sector}")
     print(f"  Center system : {center_system}")

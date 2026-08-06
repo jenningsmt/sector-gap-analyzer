@@ -1,6 +1,6 @@
-"""Persisted settings for the Sector Gap Analyzer GUI.
+"""Persisted settings for the Sector Surveyor GUI.
 
-Stored under %APPDATA%\\SectorGapAnalyzer\\config.json (Windows), deliberately
+Stored under %APPDATA%\\SectorSurveyor\\config.json (Windows), deliberately
 independent of where the app's own executable/script lives, since a frozen
 exe on the Desktop still needs to know where the actual project data
 (sector_library DBs, out/ reports, the galaxy dump) lives.
@@ -13,12 +13,17 @@ import os
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "SectorGapAnalyzer"
+APP_NAME = "SectorSurveyor"
+
+# Pre-rebrand folder name (the app was "Sector Gap Analyzer" through v1.2.0).
+# load_config() migrates a settings file found here forward one time, so
+# existing installs don't silently lose their configuration on upgrade.
+_OLD_APP_NAME = "SectorGapAnalyzer"
 
 # Displayed in the window title. Keep in sync with installer.iss's
 # MyAppVersion and version_info.txt's filevers/prodvers/FileVersion/
 # ProductVersion when cutting a new release.
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 
 def _default_workspace_dir() -> str:
@@ -59,14 +64,38 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def config_path() -> Path:
+def _appdata_base() -> Path:
     appdata = os.environ.get("APPDATA")
-    base = Path(appdata) if appdata else Path.home() / ".config"
-    return base / APP_NAME / "config.json"
+    return Path(appdata) if appdata else Path.home() / ".config"
+
+
+def config_path() -> Path:
+    return _appdata_base() / APP_NAME / "config.json"
+
+
+def _old_config_path() -> Path:
+    return _appdata_base() / _OLD_APP_NAME / "config.json"
+
+
+def _migrate_old_config_if_needed(path: Path) -> None:
+    """One-time forward-copy of a pre-rebrand (Sector Gap Analyzer) settings
+    file, so upgrading to Sector Surveyor doesn't silently reset settings.
+    The old file is left in place untouched -- this only ever copies."""
+    if path.exists():
+        return
+    old_path = _old_config_path()
+    if not old_path.exists():
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(old_path.read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def load_config() -> dict[str, Any]:
     path = config_path()
+    _migrate_old_config_if_needed(path)
     config = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
     if path.exists():
         try:
