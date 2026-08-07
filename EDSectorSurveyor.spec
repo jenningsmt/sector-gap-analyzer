@@ -28,7 +28,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='SectorSurveyor',
+    name='EDSectorSurveyor',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -49,5 +49,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='SectorSurveyor',
+    name='EDSectorSurveyor',
 )

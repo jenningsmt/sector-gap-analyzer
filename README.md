@@ -1,8 +1,9 @@
-# Sector Surveyor
+# ED Sector Surveyor
 
-*(Formerly "Sector Gap Analyzer," renamed as of v1.3.0 — same project, same
-repo history, shorter name. See [Installation](#installation-end-users)
-below if you have the old version installed already.)*
+*(Formerly "Sector Surveyor" through v1.3.0, and originally "Sector Gap
+Analyzer" through v1.2.0 — same project, same repo history. Renamed again as
+of v1.4.0. See [Installation](#installation-end-users) below if you have an
+old version installed already.)*
 
 Tooling for identifying **likely-but-undiscovered star systems** in specific
 Elite Dangerous procedurally-generated sectors, for exploration flight
@@ -18,13 +19,13 @@ original design rationale (note: that document describes a more elaborate
 scoring model than what's actually implemented — see
 [Relationship to docs/gap-finder.md](#relationship-to-docsgap-findermd) below).
 
-![Sector Surveyor — Run tab](docs/images/screenshot.png)
+![ED Sector Surveyor — Run tab](docs/images/screenshot.png)
 
 ## Installation (end users)
 
 If you just want to run the app rather than work with the scripts directly:
 
-1. Download the latest installer (`SectorSurveyor-Setup-X.Y.Z.exe`) from this
+1. Download the latest installer (`EDSectorSurveyor-Setup-X.Y.Z.exe`) from this
    repo's [Releases](../../releases) page and run it. It installs per-user (no
    admin rights needed) and adds a Desktop/Start Menu shortcut. Since the
    installer and app aren't code-signed, Windows SmartScreen (and possibly
@@ -36,13 +37,13 @@ If you just want to run the app rather than work with the scripts directly:
    the **full/all-systems** dump, not the "populated systems only" one (see
    [Source data](#1-source-data-the-galaxy-dump) below) — and save it to:
    ```
-   %LOCALAPPDATA%\SectorSurveyor\workspace\source_data\galaxy.json.gz
+   %LOCALAPPDATA%\EDSectorSurveyor\workspace\source_data\galaxy.json.gz
    ```
    That's the default the app already looks for, so placing it there means
    the Settings tab needs no changes. If you'd rather keep your dump
    somewhere else (e.g. shared across other projects), use the **Browse**
    button in the Settings tab to point at it instead.
-3. Launch **Sector Surveyor** from the Desktop shortcut. Check the
+3. Launch **ED Sector Surveyor** from the Desktop shortcut. Check the
    Settings tab (workspace folder + galaxy dump path), then use the Run tab:
    add one or more sector names, pick which stages to run, and hit Run. The
    app will refuse to start (and jump you to Settings) if the galaxy dump
@@ -52,18 +53,20 @@ Building from source instead (for development, or to build your own
 installer) is covered in [Dependencies](#dependencies) and
 [Building a release](#building-a-release) below.
 
-**Upgrading from Sector Gap Analyzer (pre-v1.3.0)?** Sector Surveyor installs
-as a separate app — it won't overwrite or interfere with an existing Sector
-Gap Analyzer install. Your settings (workspace folder, galaxy dump path,
-sector list, stage toggles) carry forward automatically on first launch; your
-sector data isn't affected either way, since it lives wherever your workspace
-folder points, not inside the app install itself. Once you've confirmed
-Sector Surveyor is working, uninstall the old "Sector Gap Analyzer" entry
-from Windows Settings/Control Panel whenever convenient — there's no rush.
+**Upgrading from Sector Surveyor (pre-v1.4.0) or the original Sector Gap
+Analyzer (pre-v1.3.0)?** ED Sector Surveyor installs as a separate app — it
+won't overwrite or interfere with an existing Sector Surveyor or Sector Gap
+Analyzer install. Your settings (workspace folder, galaxy dump path, sector
+list, stage toggles) carry forward automatically on first launch from
+whichever prior install you have; your sector data isn't affected either
+way, since it lives wherever your workspace folder points, not inside the
+app install itself. Once you've confirmed ED Sector Surveyor is working,
+uninstall the old entry (or entries) from Windows Settings/Control Panel
+whenever convenient — there's no rush.
 
 ## Antivirus and SmartScreen warnings — what to expect and what to do
 
-Sector Surveyor is a small open-source tool. Its releases are currently
+ED Sector Surveyor is a small open-source tool. Its releases are currently
 **not code-signed** (code-signing certificates are expensive and reputation
 takes time to build), so Windows and some antivirus products will treat the
 installer with suspicion the first time they see it. **This is expected and
@@ -76,7 +79,7 @@ You can (and should) verify the download yourself; instructions below.
 Every release on the [Releases](../../releases) page lists a SHA-256
 checksum for the installer. After downloading, open PowerShell and run:
 
-    Get-FileHash .\SectorSurveyor-Setup-X.Y.Z.exe -Algorithm SHA256
+    Get-FileHash .\EDSectorSurveyor-Setup-X.Y.Z.exe -Algorithm SHA256
 
 If the hash printed matches the one in the release notes, your file is
 byte-for-byte the one the maintainer published, and the warnings below are
@@ -96,7 +99,7 @@ That's it — SmartScreen only gates the first run.
 ### Your antivirus flags, quarantines, or deletes the file
 
 Some antivirus products go further than a warning and quarantine the
-installer or the installed `SectorSurveyor.exe`. This is a **false
+installer or the installed `EDSectorSurveyor.exe`. This is a **false
 positive** with a known cause: the app is packaged with PyInstaller (a
 standard tool that bundles a Python program and the Python runtime into an
 exe), and because some actual malware is also built with PyInstaller, a few
@@ -110,7 +113,7 @@ If this happens:
    screen (the wording varies: "Restore", "Allow", "Not a threat").
 3. **Add an exclusion** so it doesn't recur — either for the installer
    file, or (after installing) for the app folder:
-   `%LOCALAPPDATA%\Programs\SectorSurveyor`
+   `%LOCALAPPDATA%\Programs\EDSectorSurveyor`
    In Windows Security this is under: Virus & threat protection →
    Manage settings → Exclusions → Add or remove exclusions.
 4. Optionally, **report the false positive** to your AV vendor — this
@@ -375,7 +378,7 @@ Packaging is manual (no CI currently) — from a Windows machine with
 
 ```bash
 pip install -r requirements-build.lock
-pyinstaller SectorSurveyor.spec --clean
+pyinstaller EDSectorSurveyor.spec --clean
 iscc installer.iss
 ```
 
@@ -387,14 +390,14 @@ version used in the release notes alongside it. Optionally set
 closer build-output reproducibility — PyInstaller otherwise embeds the
 current time.
 
-This produces `dist/SectorSurveyor/` (the onedir PyInstaller build) and
-then `dist-installer/SectorSurveyor-Setup-X.Y.Z.exe` (the installer, via
+This produces `dist/EDSectorSurveyor/` (the onedir PyInstaller build) and
+then `dist-installer/EDSectorSurveyor-Setup-X.Y.Z.exe` (the installer, via
 `installer.iss`). Bump `MyAppVersion` in `installer.iss` **and** `filevers`/
 `prodvers`/`FileVersion`/`ProductVersion` in `version_info.txt` together
 before building a new release. Neither `dist/`, `dist-installer/` are
 committed to git (see `.gitignore`) — attach the built installer `.exe` to a
 new GitHub Release instead, along with its SHA-256 checksum
-(`Get-FileHash .\SectorSurveyor-Setup-X.Y.Z.exe -Algorithm SHA256`); it's
+(`Get-FileHash .\EDSectorSurveyor-Setup-X.Y.Z.exe -Algorithm SHA256`); it's
 a compiled binary and doesn't belong in git history.
 
 ## Repository layout
@@ -417,10 +420,10 @@ gui/
                     options, Run/Cancel, live log, Settings tab
   worker.py        Background-thread job runner (stdout capture, cooperative cancellation)
   pipeline.py      Orchestrates the scripts/ pipeline (sector or spatial mode) for the GUI
-  config.py        Persisted settings (%APPDATA%\SectorSurveyor\config.json)
+  config.py        Persisted settings (%APPDATA%\EDSectorSurveyor\config.json)
   main.py          Entry point (`python -m gui.main`, and the PyInstaller build target)
 
-SectorSurveyor.spec   PyInstaller build spec (onedir, custom icon)
+EDSectorSurveyor.spec PyInstaller build spec (onedir, custom icon)
 installer.iss            Inno Setup script that wraps the PyInstaller build into an installer
 icon.ico / icon.png       App icon (.ico is what's actually embedded in the build)
 requirements.txt          Runtime dependencies

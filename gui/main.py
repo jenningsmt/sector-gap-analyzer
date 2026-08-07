@@ -1,4 +1,4 @@
-"""Entry point for the Sector Surveyor GUI (and PyInstaller build target)."""
+"""Entry point for the ED Sector Surveyor GUI (and PyInstaller build target)."""
 
 from gui.app import main
 

@@ -5,7 +5,7 @@
 #
 # To rebuild a specific release identically:
 #   pip install -r requirements-build.lock
-#   pyinstaller SectorSurveyor.spec --clean
+#   pyinstaller EDSectorSurveyor.spec --clean
 #   iscc installer.iss
 #
 # Optionally set SOURCE_DATE_EPOCH before building for closer output

@@ -1,6 +1,6 @@
-"""Persisted settings for the Sector Surveyor GUI.
+"""Persisted settings for the ED Sector Surveyor GUI.
 
-Stored under %APPDATA%\\SectorSurveyor\\config.json (Windows), deliberately
+Stored under %APPDATA%\\EDSectorSurveyor\\config.json (Windows), deliberately
 independent of where the app's own executable/script lives, since a frozen
 exe on the Desktop still needs to know where the actual project data
 (sector_library DBs, out/ reports, the galaxy dump) lives.
@@ -13,17 +13,19 @@ import os
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "SectorSurveyor"
+APP_NAME = "EDSectorSurveyor"
 
-# Pre-rebrand folder name (the app was "Sector Gap Analyzer" through v1.2.0).
-# load_config() migrates a settings file found here forward one time, so
-# existing installs don't silently lose their configuration on upgrade.
-_OLD_APP_NAME = "SectorGapAnalyzer"
+# Pre-rebrand folder names, most recent first (the app was "Sector Surveyor"
+# through v1.3.0, and originally "Sector Gap Analyzer" through v1.2.0).
+# load_config() migrates the first settings file it finds among these
+# forward one time, so existing installs don't silently lose their
+# configuration on upgrade, however many rebrands back they're coming from.
+_OLD_APP_NAMES = ["SectorSurveyor", "SectorGapAnalyzer"]
 
 # Displayed in the window title. Keep in sync with installer.iss's
 # MyAppVersion and version_info.txt's filevers/prodvers/FileVersion/
 # ProductVersion when cutting a new release.
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 
 def _default_workspace_dir() -> str:
@@ -73,24 +75,27 @@ def config_path() -> Path:
     return _appdata_base() / APP_NAME / "config.json"
 
 
-def _old_config_path() -> Path:
-    return _appdata_base() / _OLD_APP_NAME / "config.json"
+def _old_config_paths() -> list[Path]:
+    base = _appdata_base()
+    return [base / name / "config.json" for name in _OLD_APP_NAMES]
 
 
 def _migrate_old_config_if_needed(path: Path) -> None:
-    """One-time forward-copy of a pre-rebrand (Sector Gap Analyzer) settings
-    file, so upgrading to Sector Surveyor doesn't silently reset settings.
-    The old file is left in place untouched -- this only ever copies."""
+    """One-time forward-copy of a pre-rebrand settings file (from the most
+    recent prior app name that has one), so upgrading to ED Sector Surveyor
+    doesn't silently reset settings. The old file is left in place untouched
+    -- this only ever copies."""
     if path.exists():
         return
-    old_path = _old_config_path()
-    if not old_path.exists():
+    for old_path in _old_config_paths():
+        if not old_path.exists():
+            continue
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(old_path.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
         return
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(old_path.read_text(encoding="utf-8"), encoding="utf-8")
-    except OSError:
-        pass
 
 
 def load_config() -> dict[str, Any]:
