@@ -1,5 +1,7 @@
 # ED Sector Surveyor
 
+<img src="icon.png" alt="ED Sector Surveyor icon" width="128" height="128">
+
 *(Formerly "Sector Surveyor" through v1.3.0, and originally "Sector Gap
 Analyzer" through v1.2.0 — same project, same repo history. Renamed again as
 of v1.4.0. See [Installation](#installation-end-users) below if you have an
